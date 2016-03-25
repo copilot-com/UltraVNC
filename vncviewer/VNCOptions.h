@@ -28,8 +28,13 @@
 
 #pragma once
 
-#define LASTENCODING rfbEncodingZYWRLE
+#include <vector>
 
+#ifdef _XZ
+#define LASTENCODING rfbEncodingXZYW
+#else
+#define LASTENCODING rfbEncodingZYWRLE
+#endif
 #define NOCURSOR 0
 #define DOTCURSOR 1
 #define NORMALCURSOR 2
@@ -73,7 +78,7 @@ public:
 						// 4 : 8 Grey colors
 						// 5 : 4 colors
 						// 6 : 2 Grey colors
-	int		m_PreferredEncoding;
+	std::vector<int> m_PreferredEncodings;
 
 	bool	m_SwapMouse;
 	bool    m_Emul3Buttons; 
@@ -163,12 +168,9 @@ public:
 
 	//adzm 2010-02-15
 	void CheckProxyAndHost();
-
-#ifdef UNDER_CE
-	// WinCE screen format for dialogs (Palm vs HPC)
-	int	m_palmpc;
-	// Use slow GDI rendering, but more accurate colours.
-	int m_slowgdi;
+#ifdef _Gii
+	//gii extention
+	bool m_giienable;
 #endif
 
 	int DoDialog(bool running = false,HWND hwnd=NULL);

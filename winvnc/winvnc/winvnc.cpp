@@ -192,8 +192,13 @@ Myinit(HINSTANCE hInstance)
 }
 //#define CRASHRPT
 #ifdef CRASHRPT
+#ifndef _X64
 #include "C:/DATA/crash/crashrpt/include/crashrpt.h"
-#pragma comment(lib, "C:/DATA/crash/crashrpt/lib/crashrpt")
+#pragma comment(lib, "C:/DATA/crash/crashrpt/lib/CrashRpt1403")
+#else
+#include "C:/DATA/crash/crashrpt/include/crashrpt.h"
+#pragma comment(lib, "C:/DATA/crash/crashrpt/lib/x64/CrashRpt1403")
+#endif
 #endif
 
 // WinMain parses the command line and either calls the main App
@@ -209,18 +214,44 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
 	// make vnc last service to stop
 	SetProcessShutdownParameters(0x100,false);
 	// handle dpi on aero
-	HMODULE hUser32 = LoadLibrary(_T("user32.dll"));
+	/*HMODULE hUser32 = LoadLibrary(_T("user32.dll"));
 	typedef BOOL (*SetProcessDPIAwareFunc)();
 	SetProcessDPIAwareFunc setDPIAware=NULL;
 	if (hUser32) setDPIAware = (SetProcessDPIAwareFunc)GetProcAddress(hUser32, "SetProcessDPIAware");
 	if (setDPIAware) setDPIAware();
-	if (hUser32) FreeLibrary(hUser32);
+	if (hUser32) FreeLibrary(hUser32);*/
 
 #ifdef IPP
 	InitIpp();
 #endif
 #ifdef CRASHRPT
-	Install(NULL, _T("UltraVNC@skynet.be"), _T(""));
+	CR_INSTALL_INFO info;
+	memset(&info, 0, sizeof(CR_INSTALL_INFO));
+	info.cb = sizeof(CR_INSTALL_INFO);
+	info.pszAppName = _T("UVNC");
+	info.pszAppVersion = _T("1.2.0.9");
+	info.pszEmailSubject = _T("UVNC server 1.2.0.9 Error Report");
+	info.pszEmailTo = _T("uvnc@skynet.be");
+	info.uPriorities[CR_SMAPI] = 1; // Third try send report over Simple MAPI    
+	// Install all available exception handlers
+	info.dwFlags |= CR_INST_ALL_POSSIBLE_HANDLERS;
+	// Restart the app on crash 
+	info.dwFlags |= CR_INST_APP_RESTART;
+	info.dwFlags |= CR_INST_SEND_QUEUED_REPORTS;
+	info.dwFlags |= CR_INST_AUTO_THREAD_HANDLERS;
+	info.pszRestartCmdLine = _T("/restart");
+	// Define the Privacy Policy URL 
+
+	// Install crash reporting
+	int nResult = crInstall(&info);
+	if (nResult != 0)
+	{
+		// Something goes wrong. Get error message.
+		TCHAR szErrorMsg[512] = _T("");
+		crGetLastErrorMsg(szErrorMsg, 512);
+		_tprintf_s(_T("%s\n"), szErrorMsg);
+		return 1;
+	}
 #endif
 	bool Injected_autoreconnect=false;
 	SPECIAL_SC_EXIT=false;
@@ -292,6 +323,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
 	if (!socksys.Initialised())
 	{
 		MessageBoxSecure(NULL, sz_ID_FAILED_INIT, szAppName, MB_OK);
+#ifdef CRASHRPT
+		crUninstall();
+#endif
 		return 0;
 	}
     // look up the current service name in the registry.
@@ -317,6 +351,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
 			i+=strlen(winvncSettingshelper);
 			strcpy( mycommand, &(szCmdLine[i+1]));
 			Set_settings_as_admin(mycommand);
+#ifdef CRASHRPT
+			crUninstall();
+#endif
 			return 0;
 		}
 
@@ -324,6 +361,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
 		{
 			Sleep(3000);
 			Set_stop_service_as_admin();
+#ifdef CRASHRPT
+			crUninstall();
+#endif
 			return 0;
 		}
 
@@ -335,27 +375,35 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
 			CloseHandle(hShutdownEventTmp);
 
 			//adzm 2010-02-10 - Finds the appropriate VNC window for any process. Sends this message to all of them!
+			// do removed, loops forever with cpu 100
 			HWND hservwnd = NULL;
-			do {
+			hservwnd = FindWinVNCWindow(false);
 				if (hservwnd!=NULL)
 				{
 					PostMessage(hservwnd, WM_COMMAND, 40002, 0);
 					PostMessage(hservwnd, WM_CLOSE, 0, 0);
 				}
-				hservwnd = FindWinVNCWindow(false);
-			} while (hservwnd!=NULL);
+#ifdef CRASHRPT
+				crUninstall();
+#endif
 			return 0;
 		}
 
 		if (strncmp(&szCmdLine[i], winvncopenhomepage, strlen(winvncopenhomepage)) == 0)
 		{
 			Open_homepage();
+#ifdef CRASHRPT
+			crUninstall();
+#endif
 			return 0;
 		}
 
 		if (strncmp(&szCmdLine[i], winvncopenforum, strlen(winvncopenforum)) == 0)
 		{
 			Open_forum();
+#ifdef CRASHRPT
+			crUninstall();
+#endif
 			return 0;
 		}
 
@@ -363,6 +411,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
 		{
 			Sleep(3000);
 			Set_start_service_as_admin();
+#ifdef CRASHRPT
+			crUninstall();
+#endif
 			return 0;
 		}
 
@@ -371,30 +422,45 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
 				//Sleeps are realy needed, else runas fails...
 				Sleep(3000);
 				Set_install_service_as_admin();
+#ifdef CRASHRPT
+				crUninstall();
+#endif
 				return 0;
 			}
 		if (strncmp(&szCmdLine[i], winvncUnInstallServiceHelper, strlen(winvncUnInstallServiceHelper)) == 0)
 			{
 				Sleep(3000);
 				Set_uninstall_service_as_admin();
+#ifdef CRASHRPT
+				crUninstall();
+#endif
 				return 0;
 			}
 		if (strncmp(&szCmdLine[i], winvncSoftwarecadHelper, strlen(winvncSoftwarecadHelper)) == 0)
 			{
 				Sleep(3000);
 				Enable_softwareCAD_elevated();
+#ifdef CRASHRPT
+				crUninstall();
+#endif
 				return 0;
 			}		 
 		if (strncmp(&szCmdLine[i], winvncdelSoftwarecadHelper, strlen(winvncdelSoftwarecadHelper)) == 0)
 			{
 				Sleep(3000);
 				delete_softwareCAD_elevated();
+#ifdef CRASHRPT
+				crUninstall();
+#endif
 				return 0;
 			}
 		if (strncmp(&szCmdLine[i], winvncRebootSafeHelper, strlen(winvncRebootSafeHelper)) == 0)
 			{
 				Sleep(3000);
 				Reboot_in_safemode_elevated();
+#ifdef CRASHRPT
+				crUninstall();
+#endif
 				return 0;
 			}
 
@@ -402,6 +468,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
 			{
 				Sleep(3000);
 				Reboot_with_force_reboot_elevated();
+#ifdef CRASHRPT
+				crUninstall();
+#endif
 				return 0;
 			}
 
@@ -409,6 +478,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
 			{
 				Sleep(3000);
 				winvncSecurityEditorHelper_as_admin();
+#ifdef CRASHRPT
+				crUninstall();
+#endif
 				return 0;
 			}
 		if (strncmp(&szCmdLine[i], winvncSecurityEditor, strlen(winvncSecurityEditor)) == 0)
@@ -429,6 +501,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
 						CoUninitialize();
 						FreeLibrary(hModule);
 					}
+#ifdef CRASHRPT
+					crUninstall();
+#endif
 				return 0;
 			}
 
@@ -438,6 +513,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
 			i+=strlen(winvncSettings);
 			strcpy( mycommand, &(szCmdLine[i+1]));
 			Real_settings(mycommand);
+#ifdef CRASHRPT
+			crUninstall();
+#endif
 			return 0;
 		}
 		
@@ -447,6 +525,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
 			i += strlen(dsmpluginhelper);
 			strcpy(mycommand, &(szCmdLine[i + 1]));
 			Secure_Plugin_elevated(mycommand);
+#ifdef CRASHRPT
+			crUninstall();
+#endif
 			return 0;
 		}
 
@@ -456,6 +537,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
 			i += strlen(dsmplugininstance);
 			strcpy(mycommand, &(szCmdLine[i + 1]));
 			Secure_Plugin(mycommand);
+#ifdef CRASHRPT
+			crUninstall();
+#endif
 			return 0;
 		}
 
@@ -463,36 +547,54 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
 		if (strncmp(&szCmdLine[i], winvncSoftwarecad, strlen(winvncSoftwarecad)) == 0)
 		{
 			Enable_softwareCAD();
+#ifdef CRASHRPT
+			crUninstall();
+#endif
 			return 0;
 		}
 
 		if (strncmp(&szCmdLine[i], winvncdelSoftwarecad, strlen(winvncdelSoftwarecad)) == 0)
 		{
 			delete_softwareCAD();
+#ifdef CRASHRPT
+			crUninstall();
+#endif
 			return 0;
 		}
 
 		if (strncmp(&szCmdLine[i], winvncRebootSafe, strlen(winvncRebootSafe)) == 0)
 		{
 			Reboot_in_safemode();
+#ifdef CRASHRPT
+			crUninstall();
+#endif
 			return 0;
 		}
 
 		if (strncmp(&szCmdLine[i], winvncRebootForce, strlen(winvncRebootForce)) == 0)
 		{
 			Reboot_with_force_reboot();
+#ifdef CRASHRPT
+			crUninstall();
+#endif
 			return 0;
 		}
 
 		if (strncmp(&szCmdLine[i], winvncStopservice, strlen(winvncStopservice)) == 0)
 		{
 			Real_stop_service();
+#ifdef CRASHRPT
+			crUninstall();
+#endif
 			return 0;
 		}
 
 		if (strncmp(&szCmdLine[i], winvncStartservice, strlen(winvncStartservice)) == 0)
 		{
 			Real_start_service();
+#ifdef CRASHRPT
+			crUninstall();
+#endif
 			return 0;
 		}
 
@@ -532,6 +634,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
 				char command[MAX_PATH + 32]; // 29 January 2008 jdp
                 _snprintf(command, sizeof command, "net start \"%s\"", service_name);
 				WinExec(command,SW_HIDE);
+#ifdef CRASHRPT
+				crUninstall();
+#endif
 				return 0;
 			}
 		if (strncmp(&szCmdLine[i], winvncUnInstallService, strlen(winvncUnInstallService)) == 0)
@@ -568,6 +673,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
                 _snprintf(command, sizeof command, "net stop \"%s\"", service_name);
 				WinExec(command,SW_HIDE);
 				uninstall_service();
+#ifdef CRASHRPT
+				crUninstall();
+#endif
 				return 0;
 			}
 
@@ -577,12 +685,19 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
 			if (!Myinit(hInstance)) return 0;
 			fRunningFromExternalService = true;
 			vncService::RunningFromExternalService(true);
-			return WinVNCAppMain();
+			int returnvalue = WinVNCAppMain();
+#ifdef CRASHRPT
+			crUninstall();
+#endif
+			return returnvalue;
 		}
 
 		if (strncmp(&szCmdLine[i], winvncStartService, strlen(winvncStartService)) == 0)
 		{
 		start_service(szCmdLine);
+#ifdef CRASHRPT
+		crUninstall();
+#endif
 		return 0;
 		}
 
@@ -590,7 +705,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
 		{
 			// WinVNC is being run as a user-level program
 			if (!Myinit(hInstance)) return 0;
-			return WinVNCAppMain();
+			int returnvalue = WinVNCAppMain();
+#ifdef CRASHRPT
+			crUninstall();
+#endif
+			return returnvalue;
 		}
 
 		if (strncmp(&szCmdLine[i], winvncSCexit, strlen(winvncSCexit)) == 0)
@@ -866,10 +985,22 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
 	// If no arguments were given then just run
 	if (!argfound)
 	{
-		if (!Myinit(hInstance)) return 0;
-		return WinVNCAppMain();
+		if (!Myinit(hInstance))
+		{
+#ifdef CRASHRPT
+			crUninstall();
+#endif
+			return 0;
+		}
+		int returnvalue= WinVNCAppMain();
+#ifdef CRASHRPT
+		crUninstall();
+#endif
+		return returnvalue;
 	}
-
+#ifdef CRASHRPT
+	crUninstall();
+#endif
 	return 0;
 }
 
@@ -1063,6 +1194,7 @@ int WinVNCAppMain()
 			// We don't allow multiple instances!
 			if (!fRunningFromExternalService)
 				MessageBoxSecure(NULL, sz_ID_ANOTHER_INST, szAppName, MB_OK);
+			if (instancehan != NULL) delete instancehan;
 			return 0;
 		}
 	}

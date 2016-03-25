@@ -65,6 +65,12 @@ extern "C"
 #include <vector>
 #include <algorithm>
 #include "./directx/directxviewer.h"
+#ifdef _Gii
+#include "vnctouch.h"
+#define TOUCH_REGISTER_TIMER 1014
+#define TOUCH_SLEEP_TIMER 1015
+class vnctouch;
+#endif
 extern const UINT FileTransferSendPacketMessage;
 
 #ifndef max
@@ -120,7 +126,7 @@ struct BitmapInfo {
   };
 };
 
-namespace rdr { class InStream; class FdInStream; class ZlibInStream; }
+namespace rdr { class InStream; class FdInStream; class ZlibInStream; class xzInStream; }
 
 class ClientConnection  : public omni_thread
 {
@@ -161,6 +167,7 @@ public:
 	class ProtocolExc {};
 	class Fatal {};
 	HANDLE KillEvent;
+	HANDLE KillUpdateThreadEvent;
     bool SetSendTimeout(int msecs = -1);
     bool SetRecvTimeout(int msecs = -1);
 
@@ -174,7 +181,18 @@ public:
 
 	bool m_Is_Listening;
 
+// _Gii need to be global 
+	RECT m_TBr;
+	int m_hScrollPos, m_vScrollPos;
+	rfbServerInitMsg m_si;
+	// The size of the current client area
+	int m_cliwidth, m_cliheight;
+	void WriteExact(char *buf, int bytes); //adzm 2010-09
+
 private:
+#ifdef _Gii
+	vnctouch *mytouch;
+#endif
 	static LRESULT CALLBACK WndProc(HWND hwnd, UINT iMsg, WPARAM wParam, LPARAM lParam);
 	static LRESULT CALLBACK WndProcTBwin(HWND hwnd, UINT iMsg, WPARAM wParam, LPARAM lParam);
 	static LRESULT CALLBACK WndProchwnd(HWND hwnd, UINT iMsg, WPARAM wParam, LPARAM lParam);
@@ -195,8 +213,6 @@ private:
 	bool m_serverInitiated;
 	HWND m_hwndcn, m_hbands,m_hwndTB,m_hwndTBwin,m_hwndStatus,m_TrafficMonitor,m_logo_wnd,m_button_wnd;
 	HANDLE m_statusThread;
-	RECT m_TBr;
-	// bool m_ToolbarEnable;
 	bool m_remote_mouse_disable;
 	bool m_SWselect;
 	POINT m_SWpoint;
@@ -427,8 +443,7 @@ private:
 	void WriteTransformed(char *buf, int bytes, bool bQueue); //adzm 2010-09
 	void WriteTransformed(char *buf, int bytes, CARD8 msgType, bool bQueue); //sf@2002 - DSM Plugin
 
-	//adzm 2010-09
-	void WriteExact(char *buf, int bytes); //adzm 2010-09
+	//adzm 2010-09	
 	void WriteExactProxy(char *buf, int bytes); // same as Write
 	void WriteExact(char *buf, int bytes, CARD8 msgType); //sf@2002 - DSM Plugin
 
@@ -463,6 +478,9 @@ private:
 	// sf@2002 - DSM Plugin
 	void CheckNetRectBufferSize(int nBufSize);
 	void CheckZRLENetRectBufferSize(int nBufSize);
+#ifdef _XZ
+	void CheckXZNetRectBufferSize(int nBufSize);
+#endif
 	//
 	int EncodingStatusWindow,OldEncodingStatusWindow;
 
@@ -595,8 +613,19 @@ private:
 	int m_nZRLENetRectBufOffset;
 	int m_nZRLEReadSize;
 	int m_nZRLENetRectBufSize;
+
+#ifdef _XZ
+	BYTE* m_pXZNetRectBuf;
+	bool m_fReadFromXZNetRectBuf;  // 
+	int m_nXZNetRectBufOffset;
+	int m_nXZReadSize;
+	int m_nXZNetRectBufSize;
+#endif
 	omni_mutex	m_NetRectBufferMutex;
 	omni_mutex	m_ZRLENetRectBufferMutex;
+#ifdef _XZ
+	omni_mutex	m_XZNetRectBufferMutex;
+#endif
 	omni_mutex	m_ZipBufferMutex;
 	omni_mutex	m_FileZipBufferMutex;
 	omni_mutex	m_FileChunkBufferMutex;
@@ -610,11 +639,9 @@ private:
 	char m_cmdlnUser[256]; // act: add user option on command line
 	char m_clearPasswd[256]; // Modif sf@2002
 
-	rfbServerInitMsg m_si;
 	rfbPixelFormat m_myFormat, m_pendingFormat;
 	// protocol version in use.
 	int m_majorVersion, m_minorVersion;
-	bool m_threadStarted;
 	// mid-connection format change requested
 
 	// sf@2002 - v1.1.0
@@ -632,7 +659,7 @@ private:
 	HMENU m_hPopupMenuKeyboard;
 
 	// Window may be scrollable - these control the scroll position
-	int m_hScrollPos, m_hScrollMax, m_vScrollPos, m_vScrollMax;
+	int m_hScrollMax, m_vScrollMax;
 	// The current window size
 	int m_winwidth, m_winheight;
 	bool SB_HORZ_BOOL;
@@ -640,8 +667,6 @@ private:
 	__int64 m_BytesSend;
 	__int64 m_BytesRead;
 	HANDLE m_bitmapFRONT,m_bitmapBACK,m_bitmapNONE,m_logo_min;
-	// The size of the current client area
-	int m_cliwidth, m_cliheight;
 	// The size of a window needed to hold entire screen without scrollbars
 	int m_fullwinwidth, m_fullwinheight;
 	// The size of the CE CommandBar
@@ -722,6 +747,27 @@ private:
 	long zywrle;
 	long zywrle_level;
 	int zywrleBuf[rfbZRLETileWidth*rfbZRLETileHeight];
+
+#ifdef _XZ
+	rdr::xzInStream* xzis;
+	void xzDecode(int x, int y, int w, int h);
+	void xzDecode8NE(int x, int y, int w, int h, rdr::InStream* is,
+		rdr::xzInStream* xzis, rdr::U8* buf);
+	void xzDecode15LE(int x, int y, int w, int h, rdr::InStream* is,
+		rdr::xzInStream* xzis, rdr::U16* buf);
+	void xzDecode16LE(int x, int y, int w, int h, rdr::InStream* is,
+		rdr::xzInStream* xzis, rdr::U16* buf);
+	void xzDecode24ALE(int x, int y, int w, int h, rdr::InStream* is,
+		rdr::xzInStream* xzis, rdr::U32* buf);
+	void xzDecode24BLE(int x, int y, int w, int h, rdr::InStream* is,
+		rdr::xzInStream* xzis, rdr::U32* buf);
+	void xzDecode32LE(int x, int y, int w, int h, rdr::InStream* is,
+		rdr::xzInStream* xzis, rdr::U32* buf);
+
+	long xzyw;
+	long xzyw_level;
+	int xzywBuf[rfbXZTileWidth*rfbXZTileHeight];
+#endif
 
 	void ConvertAll(int width, int height, int xx, int yy,int bytes_per_pixel,BYTE* source,BYTE* dest,int framebufferWidth);
 	void ConvertPixel(int xx, int yy,int bytes_per_pixel,BYTE* source,BYTE* dest,int framebufferWidth);

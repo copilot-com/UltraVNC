@@ -22,19 +22,12 @@
 //
 ////////////////////////////////////////////////////////////////////////////
 
-#define _WIN32_WINDOWS 0x0410
-#define WINVER 0x0400
-
 #include "stdhdrs.h"
 
 #include "vncviewer.h"
 
-#ifdef UNDER_CE
-#include "omnithreadce.h"
-#define SD_BOTH 0x02
-#else
 #include "omnithread/omnithread.h"
-#endif
+
 
 #include "ClientConnection.h"
 #include "SessionDialog.h"
@@ -49,6 +42,13 @@ extern "C" {
 
 #include <rdr/FdInStream.h>
 #include <rdr/ZlibInStream.h>
+#include <rdr/ZlibOutStream.h>
+#ifdef _XZ
+#include <rdr/xzInStream.h>
+#endif
+#include <rdr/MemInStream.h>
+#include <rdr/xzOutStream.h>
+#include <rdr/MemOutStream.h>
 #include <rdr/Exception.h>
 
 #include <rfb/dh.h>
@@ -61,7 +61,11 @@ extern "C" {
 #pragma comment(lib, "imm32.lib")
 
 #define INITIALNETBUFSIZE 4096
+#ifdef _XZ
+#define MAX_ENCODINGS (LASTENCODING+15)
+#else
 #define MAX_ENCODINGS (LASTENCODING+10)
+#endif
 #define VWR_WND_CLASS_NAME _T("VNCviewer")
 #define VWR_WND_CLASS_NAME_VIEWER _T("VNCviewerwindow")
 #define SESSION_MRU_KEY_NAME _T("Software\\ORL\\VNCviewer\\MRU")
@@ -245,7 +249,6 @@ ClientConnection::ClientConnection(VNCviewerApp *pApp, SOCKET sock)
     if (m_opts.autoDetect)
 	{
       m_opts.m_Use8Bit = rfbPFFullColors; //true;
-	  m_opts.m_fEnableCache = true; // sf@2002
 	}
 	m_sock = sock;
 	m_serverInitiated = true;
@@ -273,7 +276,6 @@ ClientConnection::ClientConnection(VNCviewerApp *pApp, LPTSTR host, int port)
     if (m_opts.autoDetect)
 	{
 		m_opts.m_Use8Bit = rfbPFFullColors; //true;
-		m_opts.m_fEnableCache = true; // sf@2002
 	}
 	_tcsncpy(m_host, host, MAX_HOST_NAME_LEN);
 	m_port = port;
@@ -331,7 +333,6 @@ void ClientConnection::Init(VNCviewerApp *pApp)
 	//adzm 2010-08-01
 	m_LastSentTick = 0;
 	m_bKillThread = false;
-	m_threadStarted = true;
 	m_running = false;
 	m_pendingFormatChange = false;
 
@@ -350,6 +351,14 @@ void ClientConnection::Init(VNCviewerApp *pApp)
 	m_nZRLENetRectBufOffset = 0;
 	m_nZRLEReadSize = 0;
 	m_nZRLENetRectBufSize = 0;
+#ifdef _XZ
+	m_pXZNetRectBuf = NULL;
+	m_fReadFromXZNetRectBuf = false;  // 
+	m_nXZNetRectBufOffset = 0;
+	m_nXZReadSize = 0;
+	m_nXZNetRectBufSize = 0;
+#endif
+
 	//adzm - 2009-06-21
 	m_pPluginInterface = NULL;
 	//adzm 2010-05-10
@@ -388,6 +397,9 @@ void ClientConnection::Init(VNCviewerApp *pApp)
 	m_fScalingDone = false;
 
     zis = new rdr::ZlibInStream;
+#ifdef _XZ
+	xzis = new rdr::xzInStream;
+#endif
 
 	// tight cusorhandling
 	prevCursorSet = false;
@@ -455,6 +467,7 @@ void ClientConnection::Init(VNCviewerApp *pApp)
 	m_BigToolbar=false;
 	strcpy(m_proxyhost,"");
 	KillEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
+	KillUpdateThreadEvent = CreateEvent(NULL, FALSE, TRUE, NULL);
 	newtick=0;
 	oldtick=0;
 
@@ -465,6 +478,10 @@ void ClientConnection::Init(VNCviewerApp *pApp)
 	rcSource=NULL;
 	rcMask=NULL;
 	zywrle_level = 1;
+#ifdef _XZ
+	xzyw_level = 1;
+	xzyw = 0;
+#endif
 
 	m_autoReconnect = m_opts.m_autoReconnect;
 	ThreadSocketTimeout=NULL;
@@ -501,6 +518,11 @@ void ClientConnection::Init(VNCviewerApp *pApp)
 	//adzm 2010-10
 	m_PendingMouseMove.dwMinimumMouseMoveInterval = m_opts.m_throttleMouse;
 	directx_used=false;
+
+#ifdef _Gii
+	mytouch = new vnctouch;
+	mytouch->Set_ClientConnect(this);
+#endif
 }
 
 // helper functions for setting socket timeouts during file transfer
@@ -1219,13 +1241,8 @@ void ClientConnection::GTGBS_CreateToolbar()
 
 void ClientConnection::CreateDisplay()
 {
-#ifdef _WIN32_WCE
-	//const DWORD winstyle = WS_VSCROLL | WS_HSCROLL | WS_CAPTION | WS_SYSMENU;
-	const DWORD winstyle =  WS_CHILD;
-#else
-	//const DWORD winstyle = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_THICKFRAME | WS_VSCROLL | WS_HSCROLL;
 	const DWORD winstyle = WS_CHILD;
-#endif
+
 	RECT Rmain;
 	RECT Rtb;
 	GetClientRect(m_hwndMain,&Rmain);
@@ -1410,7 +1427,6 @@ void ClientConnection::CreateDisplay()
 void ClientConnection::WatchClipboard()
 {
 	// Set up clipboard watching
-#ifndef _WIN32_WCE
 	// We want to know when the clipboard changes, so
 	// insert ourselves in the viewer chain. But doing
 	// this will cause us to be notified immediately of
@@ -1421,7 +1437,7 @@ void ClientConnection::WatchClipboard()
 	m_hwndNextViewer = SetClipboardViewer(m_hwndcn);
 	vnclog.Print(6, "SetClipboardViewer to 0x%08x; next is 0x%08x. Last error 0x%08x", m_hwndcn, m_hwndNextViewer, GetLastError());
 	m_settingClipboardViewer = false;
-#endif
+
 }
 
 // adzm - 2010-07 - Extended clipboard
@@ -1628,14 +1644,17 @@ void ClientConnection::HandleQuickOption()
 	switch (m_opts.m_quickoption)
 	{
 	case 1:
-		m_opts.m_PreferredEncoding = rfbEncodingZRLE;
+		m_opts.m_PreferredEncodings.clear();
+		if (new_ultra_server) m_opts.m_PreferredEncodings.push_back(rfbEncodingUltra2);
+		else m_opts.m_PreferredEncodings.push_back(rfbEncodingHextile);
 		m_opts.m_Use8Bit = rfbPFFullColors; //false;
-		m_opts.m_fEnableCache = true;
+		m_opts.m_fEnableCache = false;
 		m_opts.autoDetect = true;
 		break;
 
 	case 2:
-		m_opts.m_PreferredEncoding = rfbEncodingHextile;
+		m_opts.m_PreferredEncodings.clear();
+		m_opts.m_PreferredEncodings.push_back(rfbEncodingHextile);
 		m_opts.m_Use8Bit = rfbPFFullColors; // false; // Max colors
 		m_opts.autoDetect = false;
 		m_opts.m_fEnableCache = false;
@@ -1645,7 +1664,8 @@ void ClientConnection::HandleQuickOption()
 		break;
 
 	case 3:
-		m_opts.m_PreferredEncoding = rfbEncodingZRLE; // rfbEncodingZlibHex;
+		m_opts.m_PreferredEncodings.clear();
+		m_opts.m_PreferredEncodings.push_back(rfbEncodingZRLE);
 		m_opts.m_Use8Bit = rfbPF256Colors; //false;
 		m_opts.autoDetect = false;
 		m_opts.m_fEnableCache = false;
@@ -1653,14 +1673,16 @@ void ClientConnection::HandleQuickOption()
 		break;
 
 	case 4:
-		m_opts.m_PreferredEncoding = rfbEncodingZRLE;
+		m_opts.m_PreferredEncodings.clear();
+		m_opts.m_PreferredEncodings.push_back(rfbEncodingZRLE);
 		m_opts.m_Use8Bit = rfbPF64Colors; //true;
 		m_opts.autoDetect = false;
 		m_opts.m_fEnableCache = true;
 		break;
 
 	case 5:
-		m_opts.m_PreferredEncoding = rfbEncodingZRLE;
+		m_opts.m_PreferredEncodings.clear();
+		m_opts.m_PreferredEncodings.push_back(rfbEncodingZRLE);
 		m_opts.m_Use8Bit = rfbPF8Colors; //true;
 		// m_opts.m_scaling = true;
 		// m_opts.m_scale_num = 200;
@@ -1672,7 +1694,8 @@ void ClientConnection::HandleQuickOption()
 		break;
 
 	case 7:
-		m_opts.m_PreferredEncoding = rfbEncodingUltra;
+		m_opts.m_PreferredEncodings.clear();
+		m_opts.m_PreferredEncodings.push_back(rfbEncodingUltra);
 		m_opts.m_Use8Bit = rfbPFFullColors; //false; // Max colors
 		m_opts.autoDetect = false;
 		// [v1.0.2-jp2 fix-->]
@@ -1722,7 +1745,6 @@ void ClientConnection::GetConnectDetails()
 					if (m_opts.autoDetect)
 					{
 						m_opts.m_Use8Bit = rfbPFFullColors;
-						m_opts.m_fEnableCache = true; // sf@2002
 					}
 				}
 		}
@@ -1742,7 +1764,6 @@ void ClientConnection::GetConnectDetails()
 			if (m_opts.autoDetect)
 			{
 				m_opts.m_Use8Bit = rfbPFFullColors;
-				m_opts.m_fEnableCache = true; // sf@2002
 			}
 		}
 	}
@@ -1896,9 +1917,14 @@ void ClientConnection::SetSocketOptions()
 	BOOL nodelayval = TRUE;
 	if (setsockopt(m_sock, IPPROTO_TCP, TCP_NODELAY, (const char *) &nodelayval, sizeof(BOOL)))
 		throw WarningException(sz_L50);
-
-        fis = new rdr::FdInStream(m_sock);
-		fis->SetDSMMode(m_pDSMPlugin->IsEnabled()); // sf@2003 - Special DSM mode for ZRLE encoding
+	
+	// adzm 2010-10
+	if (fis) {
+		delete fis;
+		fis = NULL;
+	}
+    fis = new rdr::FdInStream(m_sock);
+	fis->SetDSMMode(m_pDSMPlugin->IsEnabled()); // sf@2003 - Special DSM mode for ZRLE encoding
 }
 
 void ClientConnection::NegotiateProtocolVersion()
@@ -2368,6 +2394,7 @@ void ClientConnection::AuthenticateServer(CARD32 authScheme, std::vector<CARD32>
 	case rfbUltraVNC:
 		new_ultra_server=true;
 		m_fServerKnowsFileTransfer = true;
+		HandleQuickOption();
 		break;
 	case rfbUltraVNC_SecureVNCPluginAuth_new:
 		if (bSecureVNCPluginActive) {
@@ -3373,6 +3400,7 @@ void ClientConnection::SetFormatAndEncodings()
 
 	// Set encodings
     char buf[sz_rfbSetEncodingsMsg + MAX_ENCODINGS * 4];
+	int aa = sz_rfbSetEncodingsMsg + MAX_ENCODINGS * 4;
     rfbSetEncodingsMsg *se = (rfbSetEncodingsMsg *)buf;
     CARD32 *encs = (CARD32 *)(&buf[sz_rfbSetEncodingsMsg]);
     int len = 0;
@@ -3386,57 +3414,54 @@ void ClientConnection::SetFormatAndEncodings()
 	//
 	if (!new_ultra_server)
 	{
-		if ( m_opts.m_PreferredEncoding == rfbEncodingUltra2) m_opts.m_PreferredEncoding=rfbEncodingZRLE;
-	}
-	// Put the preferred encoding first, and change it if the
-	// preferred encoding is not actually usable.
-	for (i = LASTENCODING; i >= rfbEncodingRaw; i--)
-	{
-		if (m_opts.m_PreferredEncoding == i) {
-			if (m_opts.m_UseEnc[i])
-			{
-				encs[se->nEncodings++] = Swap32IfLE(i);
-	  			if ( i == rfbEncodingZlib ||
-					 i == rfbEncodingTight ||
-					 i == rfbEncodingZlibHex
-			   )
-				{
-					useCompressLevel = true;
-				}
-	  			if ( i == rfbEncodingZYWRLE
-			   )
-				{
-					zywrle = 1;
-				}else{
-					zywrle = 0;
-				}
-			}
-			else
-			{
-				m_opts.m_PreferredEncoding--;
+		for (std::vector<int>::iterator it = m_opts.m_PreferredEncodings.begin(); it != m_opts.m_PreferredEncodings.end(); ++it) {
+			if (*it == rfbEncodingUltra2) {
+				*it = rfbEncodingZRLE;
 			}
 		}
 	}
+	// Put the preferred encoding first, and change it if the
+	// preferred encoding is not actually usable.
+	std::vector<int> preferred_encodings = m_opts.m_PreferredEncodings;
+
+	if (preferred_encodings.end() != std::find(preferred_encodings.begin(), preferred_encodings.end(), rfbEncodingZYWRLE)) {
+		zywrle = 1;
+	} else {
+		zywrle = 0;
+	}
+#ifdef _XZ
+	if (preferred_encodings.end() != std::find(preferred_encodings.begin(), preferred_encodings.end(), rfbEncodingXZYW)) {
+		xzyw = 1;
+	} else {
+		xzyw = 0;
+	}
+#endif
+
 
 	// Now we go through and put in all the other encodings in order.
 	// We do rather assume that the most recent encoding is the most
 	// desirable!
 	for (i = LASTENCODING; i >= rfbEncodingRaw; i--)
 	{
-		if ( i == rfbEncodingTight && m_opts.m_PreferredEncoding != rfbEncodingTight) m_opts.m_UseEnc[i]=false;
-
-		if ( (m_opts.m_PreferredEncoding != i) &&
-			 (m_opts.m_UseEnc[i]))
-		{
-			encs[se->nEncodings++] = Swap32IfLE(i);
-			if ( i == rfbEncodingZlib ||
-				 i == rfbEncodingTight ||
-				 i == rfbEncodingZlibHex
-				)
-			{
-				useCompressLevel = true;
-			}
+		if (m_opts.m_UseEnc[i] && preferred_encodings.end() == std::find(preferred_encodings.begin(), preferred_encodings.end(), i)) {
+			preferred_encodings.push_back(i);
 		}
+	}
+	
+	for (std::vector<int>::iterator it = preferred_encodings.begin(); it != preferred_encodings.end(); it++) {
+		if (*it == rfbEncodingZlib ||
+			*it == rfbEncodingTight ||
+			*it == rfbEncodingZlibHex 
+#ifdef _XZ
+			||*it == rfbEncodingXZ ||
+			*it == rfbEncodingXZYW
+#endif
+			)
+		{
+			useCompressLevel = true;
+		}
+
+		encs[se->nEncodings++] = Swap32IfLE(*it);
 	}
 
 	// Tight - Request desired compression level if applicable
@@ -3493,10 +3518,17 @@ void ClientConnection::SetFormatAndEncodings()
 		encs[se->nEncodings++] = Swap32IfLE(rfbEncodingPluginStreaming);
 	}
 
+#ifdef _Gii
+	if (m_opts.m_giienable)
+		encs[se->nEncodings++] = Swap32IfLE(rfbEncodingGII);
+#endif
+
+
     // sf@2002 - DSM Plugin
 	int nEncodings = se->nEncodings;
 	se->nEncodings = Swap16IfLE(se->nEncodings);
 	// WriteExact((char *)buf, len);
+	int bb = sz_rfbSetEncodingsMsg + sizeof(CARD32) * nEncodings;
 	WriteExact((char *)buf, sz_rfbSetEncodingsMsg + sizeof(CARD32) * nEncodings, rfbSetEncodings);
 }
 void ClientConnection::Createdib()
@@ -3617,6 +3649,10 @@ void ClientConnection::SuspendThread()
 	delete(zis);
 	zis = new rdr::ZlibInStream;
 
+#ifdef _XZ
+	delete(xzis);
+	xzis = new rdr::xzInStream;
+#endif
 	for (int i = 0; i < 4; i++)
 		m_tightZlibStreamActive[i] = false;
 
@@ -3624,17 +3660,28 @@ void ClientConnection::SuspendThread()
 	m_nTO = 1;
 	LoadDSMPlugin(true);
 	// WHat is this doing here ???
-	// m_fUseProxy = false;  << repeater block after reconnect
+	// m_fUseProxy = false;  << repeater block after reconnect+	
+
+	delete[] m_pNetRectBuf;
 	m_pNetRectBuf = NULL;
 	m_fReadFromNetRectBuf = false;
 	m_nNetRectBufOffset = 0;
 	m_nReadSize = 0;
 	m_nNetRectBufSize = 0;
+	delete[] m_pZRLENetRectBuf;
 	m_pZRLENetRectBuf = NULL;
 	m_fReadFromZRLENetRectBuf = false;
 	m_nZRLENetRectBufOffset = 0;
 	m_nZRLEReadSize = 0;
 	m_nZRLENetRectBufSize = 0;
+#ifdef _XZ
+	delete[] m_pXZNetRectBuf;
+	m_pXZNetRectBuf = NULL;
+	m_fReadFromXZNetRectBuf = false;
+	m_nXZNetRectBufOffset = 0;
+	m_nXZReadSize = 0;
+	m_nXZNetRectBufSize = 0;
+#endif
 
 	if (m_sock != INVALID_SOCKET)
 	{
@@ -3659,7 +3706,7 @@ ClientConnection::~ClientConnection()
 {	
 	if (m_hwndStatus)
 		EndDialog(m_hwndStatus,0);
-	Sleep(500);
+	WaitForSingleObject(KillUpdateThreadEvent, 6000);
 	if (m_pNetRectBuf != NULL)
 		delete [] m_pNetRectBuf;
 	LowLevelHook::Release();
@@ -3686,12 +3733,20 @@ ClientConnection::~ClientConnection()
 
     if (zis)
       delete zis;
-
+#ifdef _XZ
+	if (xzis)
+		delete(xzis);
+#endif
     if (fis)
       delete fis;
 
 	if (m_pZRLENetRectBuf != NULL)
 		delete [] m_pZRLENetRectBuf;
+#ifdef _XZ
+	if (m_pXZNetRectBuf != NULL)
+		delete [] m_pXZNetRectBuf;
+#endif
+
 
 	if (m_sock != INVALID_SOCKET) {
 		shutdown(m_sock, SD_BOTH);
@@ -3743,6 +3798,7 @@ ClientConnection::~ClientConnection()
 	if (rcMask!=NULL)
 		delete[] rcMask;
 	if (KillEvent) CloseHandle(KillEvent);
+	if (KillUpdateThreadEvent) CloseHandle(KillUpdateThreadEvent);
 	if (ThreadSocketTimeout)
 	{
 	havetobekilled=false; //force SocketTimeout thread to quit
@@ -3760,6 +3816,13 @@ ClientConnection::~ClientConnection()
         delete m_keymapJap;
         m_keymapJap = NULL;
     }
+#ifdef _Gii
+	if (mytouch)
+	{
+		delete mytouch;
+		mytouch = NULL;
+	}
+#endif
 }
 
 // You can specify a dx & dy outside the limits; the return value will
@@ -4421,7 +4484,6 @@ void ClientConnection::ShowConnInfo()
 void* ClientConnection::run_undetached(void* arg) {
 	vnclog.Print(9,_T("Update-processing thread started\n"));
 
-	m_threadStarted = true;
 
 	// Modif sf@2002 - Server Scaling
 	m_nServerScale = m_opts.m_nServerScale;
@@ -4452,6 +4514,7 @@ void* ClientConnection::run_undetached(void* arg) {
 	// Error, value can be set 0 by gui in that case you get a gray screen
 	if (m_autoReconnect==0) m_autoReconnect=1;
 	initialupdate_counter=0;
+	ResetEvent(KillUpdateThreadEvent);
 	while (m_autoReconnect > 0)
 	{
 		try
@@ -4483,6 +4546,11 @@ void* ClientConnection::run_undetached(void* arg) {
 
 				switch (msgType)
 				{
+#ifdef _Gii
+				case rfbGIIMessage:
+					mytouch->_handle_gii_message(m_hwndcn);
+					break;
+#endif
                 case rfbKeepAlive:
                     m_server_wants_keepalives = true;
 #if defined(_DEBUG)
@@ -4638,12 +4706,12 @@ void* ClientConnection::run_undetached(void* arg) {
 			PostMessage(m_hwndMain, WM_CLOSE, reconnectcounter, 1);
 		}
 
-		Sleep(0);
-		Sleep(2000);
+		if (m_autoReconnect>0 && !m_bKillThread) Sleep(2000);
 	}
 
 	vnclog.Print(4, _T("Update-processing thread finishing\n") );
 	SetEvent(KillEvent);
+	SetEvent(KillUpdateThreadEvent);
 		// sf@2002
 	m_pFileTransfer->m_fFileTransferRunning = false;
 	m_pTextChat->m_fTextChatRunning = false;
@@ -4883,7 +4951,7 @@ inline void ClientConnection::ReadScreenUpdate()
 
     //if (sut.nRects == 0) return;  XXX tjr removed this - is this OK?
 
-	for (UINT i=0; i < sut.nRects; i++)
+	for (UINT iCurrentRect=0; iCurrentRect < sut.nRects; iCurrentRect++)
 	{
 		rfbFramebufferUpdateRectHeader surh;
 		ReadExact((char *) &surh, sz_rfbFramebufferUpdateRectHeader);
@@ -5135,6 +5203,66 @@ inline void ClientConnection::ReadScreenUpdate()
 			zrleDecode(surh.r.x, surh.r.y, surh.r.w, surh.r.h);
 			EncodingStatusWindow=zywrle ? rfbEncodingZYWRLE : rfbEncodingZRLE;
 			break;
+#ifdef _XZ
+		case rfbEncodingXZ:
+			xzyw = 0;
+		case rfbEncodingXZYW:			
+			EncodingStatusWindow=xzyw ? rfbEncodingXZYW : rfbEncodingXZ;
+			{
+				CheckBufferSize(0x20000);
+				int nAllRects = (surh.r.x << 16) | surh.r.y;
+				int nDataLength = (surh.r.w << 16) | surh.r.h;
+
+				if (!fis->GetReadFromMemoryBuffer())
+				{
+					m_nXZReadSize = nDataLength;
+					assert(m_nXZReadSize > 0);
+					CheckXZNetRectBufferSize((int)m_nXZReadSize);
+					CheckBufferSize((int)m_nXZReadSize+4);
+					ReadExact((char*)(m_pXZNetRectBuf), (int)(m_nXZReadSize));
+					fis->SetReadFromMemoryBuffer(m_nXZReadSize, (char*)(m_pXZNetRectBuf));
+				}
+
+				xzis->setUnderlying(fis, nDataLength);
+
+				std::vector<rfbRectangle> rects;
+
+				for (int iRect = 0; iRect < nAllRects; iRect++) {
+					rfbRectangle rectangle;
+					xzis->readBytes(&rectangle, sz_rfbRectangle);
+
+					rectangle.x = Swap16IfLE(rectangle.x);
+					rectangle.y = Swap16IfLE(rectangle.y);
+					rectangle.w = Swap16IfLE(rectangle.w);
+					rectangle.h = Swap16IfLE(rectangle.h);	
+
+					rects.push_back(rectangle);
+				}
+
+				for (std::vector<rfbRectangle>::const_iterator it = rects.begin(); it != rects.end(); it++) {
+					const rfbRectangle& rect(*it);
+
+					RECT invalid_rect;
+					invalid_rect.left   = rect.x;
+					invalid_rect.top    = rect.y;
+					invalid_rect.right  = rect.x + rect.w ;
+					invalid_rect.bottom = rect.y + rect.h; 
+					
+					SoftCursorLockArea(rect.x, rect.y, rect.w, rect.h);
+
+					SaveArea(invalid_rect);
+					
+					xzDecode(rect.x, rect.y, rect.w, rect.h);
+
+					InvalidateScreenRect(&invalid_rect); 
+
+					SoftCursorUnlockScreen();
+				}
+
+				iCurrentRect += rects.size() - 1;
+			}
+			break;
+#endif
 		case rfbEncodingTight:
 			if (directx_used) m_DIBbits=directx_output.Preupdate((unsigned char *)m_DIBbits);
 			SaveArea(cacherect);
@@ -5176,6 +5304,7 @@ inline void ClientConnection::ReadScreenUpdate()
 			break;
 		}
 
+		//Todo: surh.encoding != rfbEncodingXZ && surh.encoding != rfbEncodingXZYW && 
 		if (surh.encoding !=rfbEncodingNewFBSize && surh.encoding != rfbEncodingCacheZip && surh.encoding != rfbEncodingSolMonoZip && surh.encoding != rfbEncodingUltraZip)
 		{
 			RECT rect;
@@ -5243,20 +5372,36 @@ inline void ClientConnection::ReadScreenUpdate()
 		m_lLastChangeTimeTimeout=60000;  // set to 1 minutes
 		int nOldServerScale = m_nServerScale;
 
+		for (std::vector<int>::iterator it = m_opts.m_PreferredEncodings.begin(); it != m_opts.m_PreferredEncodings.end(); ++it) {
+
+			int encoding = *it;
+			break;
+		}
+
 		if (avg_kbitsPerSecond > 10000 && (m_nConfig != 1))
 		{
 			m_nConfig = 1;
-			m_opts.m_PreferredEncoding = rfbEncodingHextile;
-			//m_opts.m_Use8Bit = rfbPFFullColors; // Max colors
+			int encoding = 0;
+			for (std::vector<int>::iterator it = m_opts.m_PreferredEncodings.begin(); it != m_opts.m_PreferredEncodings.end(); ++it) {
+				encoding = *it;
+				break;
+			}
+			m_opts.m_PreferredEncodings.clear();
+			if (new_ultra_server) m_opts.m_PreferredEncodings.push_back(rfbEncodingUltra2);
+			else m_opts.m_PreferredEncodings.push_back(rfbEncodingHextile);
+			//m_opts.m_Use8Bit = rfbPFFullColors;			
+			if (new_ultra_server && encoding == rfbEncodingUltra2 && m_opts.m_fEnableCache == false){}
+			else if (encoding == rfbEncodingHextile && m_opts.m_fEnableCache == false){}
+			else m_pendingFormatChange = true;
+
 			m_opts.m_fEnableCache = false;
-			m_pendingFormatChange = true;
 			m_lLastChangeTime = timeGetTime();
 		}
 		else if (avg_kbitsPerSecond < 10000 && avg_kbitsPerSecond > 256 && (m_nConfig != 2))
 		{
-			m_nConfig = 1;
-			if (new_ultra_server) m_opts.m_PreferredEncoding = rfbEncodingUltra2;
-			else m_opts.m_PreferredEncoding = rfbEncodingZRLE; //rfbEncodingZlibHex;
+			m_nConfig = 1;			
+			if (new_ultra_server) m_opts.m_PreferredEncodings.push_back(rfbEncodingUltra2);
+			else m_opts.m_PreferredEncodings.push_back(rfbEncodingZRLE); //rfbEncodingZlibHex;
 			//m_opts.m_Use8Bit = rfbPFFullColors; // Max colors
 			m_opts.m_fEnableCache = false;
 			m_pendingFormatChange = true;
@@ -5266,7 +5411,8 @@ inline void ClientConnection::ReadScreenUpdate()
 		else if (avg_kbitsPerSecond < 256 && avg_kbitsPerSecond > 128 && (m_nConfig != 2))
 		{
 			m_nConfig = 2;
-			m_opts.m_PreferredEncoding = rfbEncodingZRLE; //rfbEncodingZlibHex;
+			m_opts.m_PreferredEncodings.clear();
+			m_opts.m_PreferredEncodings.push_back(rfbEncodingZRLE); //rfbEncodingZlibHex;
 			//m_opts.m_Use8Bit = rfbPF256Colors;
 			m_opts.m_fEnableCache = false;
 			m_pendingFormatChange = true;
@@ -5276,7 +5422,8 @@ inline void ClientConnection::ReadScreenUpdate()
 		else if (avg_kbitsPerSecond < 128 && avg_kbitsPerSecond > 19 && (m_nConfig != 3))
 		{
 			m_nConfig = 3;
-			m_opts.m_PreferredEncoding = rfbEncodingTight; // rfbEncodingZRLE;
+			m_opts.m_PreferredEncodings.clear();
+			m_opts.m_PreferredEncodings.push_back(rfbEncodingTight); // rfbEncodingZRLE;
 			//m_opts.m_Use8Bit = rfbPF64Colors;
 			m_opts.m_fEnableCache = false;
 			m_pendingFormatChange = true;
@@ -5291,7 +5438,8 @@ inline void ClientConnection::ReadScreenUpdate()
 		else if (avg_kbitsPerSecond < 19 && avg_kbitsPerSecond > 5 && (m_nConfig != 4))
 		{
 			m_nConfig = 4;
-			m_opts.m_PreferredEncoding = rfbEncodingTight; //rfbEncodingZRLE;
+			m_opts.m_PreferredEncodings.clear();
+			m_opts.m_PreferredEncodings.push_back(rfbEncodingTight); //rfbEncodingZRLE;
 			//m_opts.m_Use8Bit = rfbPF8Colors;
 			m_opts.m_fEnableCache = false;
 			m_pendingFormatChange = true;
@@ -6301,6 +6449,26 @@ inline void ClientConnection::CheckZRLENetRectBufferSize(int nBufSize)
 	m_nZRLENetRectBufSize = nBufSize + 256;
 }
 
+#ifdef _XZ
+inline void ClientConnection::CheckXZNetRectBufferSize(int nBufSize)
+{
+	if (m_nXZNetRectBufSize > nBufSize) return;
+
+	omni_mutex_lock l(m_XZNetRectBufferMutex);
+
+	BYTE *newbuf = new BYTE[nBufSize + 256];
+	if (newbuf == NULL) 
+	{
+		// Error
+	}
+	if (m_pXZNetRectBuf != NULL)
+		delete [] m_pXZNetRectBuf;
+
+	m_pXZNetRectBuf = newbuf;
+	m_nXZNetRectBufSize = nBufSize + 256;
+}
+#endif
+
 //
 // Format file size so it is user friendly to read
 //
@@ -6386,6 +6554,14 @@ void ClientConnection::UpdateStatusFields()
   			case rfbEncodingZYWRLE:
 				if (m_hwndStatus)SetDlgItemText(m_hwndStatus, IDC_ENCODER, m_opts.m_fEnableCache ? "ZYWRLE, Cache" :"ZYWRLE");
   				break;
+#ifdef _XZ
+  			case rfbEncodingXZ:		
+				if (m_hwndStatus)SetDlgItemText(m_hwndStatus, IDC_ENCODER, m_opts.m_fEnableCache ? "XZ, Cache" :"XZ");
+  				break;
+  			case rfbEncodingXZYW:		
+				if (m_hwndStatus)SetDlgItemText(m_hwndStatus, IDC_ENCODER, m_opts.m_fEnableCache ? "XZYW, Cache" :"XZYW");
+  				break;
+#endif
 			case rfbEncodingTight:
 				if (m_hwndStatus)SetDlgItemText(m_hwndStatus, IDC_ENCODER, m_opts.m_fEnableCache ? "Tight, Cache" : "Tight");
 				break;
@@ -6444,16 +6620,9 @@ void ClientConnection::GTGBS_CreateDisplay()
 	wndclass.hbrBackground	= (HBRUSH) GetStockObject(BLACK_BRUSH);
     wndclass.lpszMenuName	= (const TCHAR *) NULL;
 	wndclass.lpszClassName	= _T("VNCMDI_Window");
-
 	RegisterClass(&wndclass);
-
-#ifdef _WIN32_WCE
-	const DWORD winstyle = WS_VSCROLL | WS_HSCROLL | WS_CAPTION | WS_SYSMENU;
-#else
 	const DWORD winstyle = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU |
 	  WS_MINIMIZEBOX |WS_MAXIMIZEBOX | WS_THICKFRAME | WS_VSCROLL | WS_HSCROLL;
-#endif
-
 	m_hwndMain = CreateWindow(_T("VNCMDI_Window"),
 			  _T("VNCviewer"),
 			  winstyle,
@@ -6467,15 +6636,6 @@ void ClientConnection::GTGBS_CreateDisplay()
 			  m_pApp->m_instance,
 			  (LPVOID)this);
 	helper::SafeSetWindowUserData(m_hwndMain, (LONG_PTR)this);
-
-	/*LONG lExStyle = GetWindowLong(m_hwndMain, GWL_EXSTYLE);
-	lExStyle &= ~(WS_EX_DLGMODALFRAME | WS_EX_CLIENTEDGE | WS_EX_STATICEDGE);
-	SetWindowLong(m_hwndMain, GWL_EXSTYLE, lExStyle);
-	LONG lStyle = GetWindowLong(m_hwndMain, GWL_STYLE);
-	lStyle &= ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZE | WS_MAXIMIZE | WS_SYSMENU);
-	SetWindowLong(m_hwndMain, GWL_STYLE, lStyle);
-	SetWindowPos(m_hwndMain, NULL, 0,0,0,0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER);*/
-	// [v1.0.2-jp1 fix]
 	ImmAssociateContext(m_hwndMain, NULL);    
 }
 
@@ -8127,6 +8287,9 @@ LRESULT CALLBACK ClientConnection::WndProcTBwin(HWND hwnd, UINT iMsg, WPARAM wPa
 return DefWindowProc(hwnd, iMsg, wParam, lParam);
 }
 
+
+
+static bool mouse_enable = true;
 //
 //
 //
@@ -8201,6 +8364,30 @@ LRESULT CALLBACK ClientConnection::WndProchwnd(HWND hwnd, UINT iMsg, WPARAM wPar
 					else if (wParam == 1013) {
 						_this->SetDormant(2);
 					}
+#ifdef _Gii
+					else if (wParam == TOUCH_REGISTER_TIMER) {
+						bool ret = RegisterTouchWindow(hwnd, 0);
+						DWORD err = GetLastError();
+#ifdef _DEBUG
+						char			szText[256];
+						if (ret != 0)
+						{
+							sprintf(szText, "RegisterTouchWindow Success \n");
+						}
+						else
+						{
+							sprintf(szText, "RegisterTouchWindow Failed with error code = %i \n", err);
+						}
+						OutputDebugString(szText);
+#endif
+						Sleep(10);
+						KillTimer(hwnd, TOUCH_REGISTER_TIMER);
+					}
+					else if (wParam == TOUCH_SLEEP_TIMER) {
+						KillTimer(hwnd, TOUCH_SLEEP_TIMER);
+						mouse_enable = true;
+					}
+#endif
 				}
 				return 0;
 
@@ -8234,13 +8421,30 @@ LRESULT CALLBACK ClientConnection::WndProchwnd(HWND hwnd, UINT iMsg, WPARAM wPar
 							return 0;
 					}
 					if ( _this->m_opts.m_ViewOnly) return 0;
+#ifdef _Gii
+					//Filter touch/pen events
+					if(IsPenEvent(GetMessageExtraInfo()) || IsTouchEvent(GetMessageExtraInfo()))
+					{
+						//ignore mouse events.
+						return 0;
+					}
+					if (mouse_enable != true) return 0;
+#endif
 					//adzm 2010-09
 					if (_this->ProcessPointerEvent(x,y, wParam, iMsg)) {
 						_this->FlushWriteQueue(true, 5);
 					}
 					return 0;
 				}
-
+#ifdef _Gii
+			case WM_TOUCH:
+				//view_only is also for the touch
+				SetTimer(hwnd, TOUCH_SLEEP_TIMER, 1000, NULL);
+				mouse_enable = false;
+				if (_this->m_opts.m_ViewOnly) return 0;
+				_this->mytouch->OnTouch(hwnd, wParam, lParam);
+				return 0;
+#endif
 			case WM_KEYDOWN:
 			case WM_KEYUP:
 			case WM_SYSKEYDOWN:
@@ -8257,27 +8461,6 @@ LRESULT CALLBACK ClientConnection::WndProchwnd(HWND hwnd, UINT iMsg, WPARAM wPar
 
 			case WM_CHAR:
 			case WM_SYSCHAR:
-#ifdef UNDER_CE
-				{
-					int key = wParam;
-					vnclog.Print(4,_T("CHAR msg : %02x\n"), key);
-					// Control keys which are in the Keymap table will already
-					// have been handled.
-					if (key == 0x0D  ||  // return
-						key == 0x20 ||   // space
-						key == 0x08)     // backspace
-						return 0;
-
-					if (key < 32) key += 64;  // map ctrl-keys onto alphabet
-					if (key > 32 && key < 127) {
-						_this->SendKeyEvent(wParam & 0xff, true);
-						_this->SendKeyEvent(wParam & 0xff, false);
-						//adzm 2010-09
-						_this->FlushWriteQueue(true, 5);
-					}
-					return 0;
-				}
-#endif
 			case WM_DEADCHAR:
 			case WM_SYSDEADCHAR:
 				return 0;
@@ -8396,6 +8579,9 @@ LRESULT CALLBACK ClientConnection::WndProchwnd(HWND hwnd, UINT iMsg, WPARAM wPar
 					vnclog.Print(6, _T("WndProchwnd ChangeClipboardChain hwnd 0x%08x / m_hwndcn 0x%08x, 0x%08x (%li)\n"), hwnd, _this->m_hwndcn, _this->m_hwndNextViewer, res);
 				}
 				#endif
+#ifdef _Gii
+				UnregisterTouchWindow(hwnd);
+#endif
 				KillTimer(_this->m_hwndcn, _this->m_idle_timer);
 				KillTimer(_this->m_hwndcn, 1013);
 				if (_this->m_waitingOnEmulateTimer)

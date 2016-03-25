@@ -1,4 +1,5 @@
 //  Copyright (C) 2002 UltraVNC Team Members. All Rights Reserved.
+//  Copyright (C) 2015 D. R. Commander. All Rights Reserved.
 //  Copyright (C) 2000-2002 Const Kaplinsky. All Rights Reserved.
 //  Copyright (C) 2002 RealVNC Ltd. All Rights Reserved.
 //  Copyright (C) 1999 AT&T Laboratories Cambridge. All Rights Reserved.
@@ -349,28 +350,6 @@ protected:
 	BOOL m_enable;
 };
 
-// Modif cs@2005
-#ifdef DSHOW
-class MutexAutoLock 
-{
-public:
-	MutexAutoLock(HANDLE* phMutex) 
-	{ 
-		m_phMutex = phMutex;
-
-		if(WAIT_OBJECT_0 != WaitForSingleObject(*phMutex, INFINITE))
-		{
-			vnclog.Print(LL_INTERR, VNCLOG("Could not get access to the mutex\n"));
-		}
-	}
-	~MutexAutoLock() 
-	{ 
-		ReleaseMutex(*m_phMutex);
-	}
-
-	HANDLE* m_phMutex;
-};
-#endif
 
 BOOL
 vncClientUpdateThread::Init(vncClient *client)
@@ -474,7 +453,7 @@ void*
 vncClientUpdateThread::run_undetached(void *arg)
 {
 	rfb::SimpleUpdateTracker update;
-	//rfb::Region2D clipregion;
+	rfb::Region2D clipregion;
 	// adzm - 2010-07 - Extended clipboard
 	//char *clipboard_text = 0;
 	update.enable_copyrect(true);
@@ -492,23 +471,18 @@ vncClientUpdateThread::run_undetached(void *arg)
 		{
 			while (!m_client->m_initial_update)
 			{
+				if (!m_client->cl_connected) return 0;
 				esc_counter++;
 				Sleep(50);
 				if (esc_counter > 100) break;
-#ifdef _DEBUG
-				char			szText[256];
-				sprintf(szText,"!m_initial_update \n");
-				OutputDebugString(szText);		
-#endif
 			}
 		}
+		if (!m_client->cl_connected) return 0;
 
 
 		{
+			m_client->m_incr_rgn.assign_union(clipregion);
 			omni_mutex_lock l(m_client->GetUpdateLock(),82);
-
-			//m_client->m_incr_rgn.assign_union(clipregion);
-
 			// We block as long as updates are disabled, or the client
 			// isn't interested in them, unless this thread is killed.
 
@@ -551,13 +525,11 @@ vncClientUpdateThread::run_undetached(void *arg)
 				// where we have got to
 				m_sync_sig->broadcast();
 				do{
+					if (!m_client->cl_connected) return 0;
 					if(m_signal->wait(UPDATE_INTERVAL*100)==false)
 					{
 						{
 								//do forcefull update after 4 seconds
-								/*rfb::Region2D update_rgn=m_client->m_encodemgr.m_buffer->GetViewerSize();
-								m_client->m_incr_rgn.assign_union(update_rgn);
-								m_client->m_update_tracker.add_changed(update_rgn);*/
 								m_client->m_encodemgr.m_buffer->m_desktop->TriggerUpdate();
 								m_client->TriggerUpdateThread();
 						}
@@ -573,7 +545,8 @@ vncClientUpdateThread::run_undetached(void *arg)
 			}
 			// If the thread is being killed then quit
 			if (!m_active) break;
-			
+			clipregion = m_client->m_incr_rgn;
+			m_client->m_incr_rgn.clear();
 
 			// SEND AN UPDATE!
 			// The thread is active, updates are enabled, and the
@@ -628,20 +601,10 @@ vncClientUpdateThread::run_undetached(void *arg)
 			// Has the palette changed?
 			send_palette = m_client->m_palettechanged;
 			m_client->m_palettechanged = FALSE;
-
-			// Fetch the incremental region
-			//clipregion = m_client->m_incr_rgn;
-			//m_client->m_incr_rgn.clear();
-
-			// Get the clipboard data, if any
-			// adzm - 2010-07 - Extended clipboard
-			if ((m_client->m_clipboard.m_bNeedToProvide || m_client->m_clipboard.m_bNeedToNotify))
-			{
-				//m_client->m_incr_rgn.clear();
-			}
 		
 			// Get the update details from the update tracker
-			m_client->m_update_tracker.flush_update(update, m_client->m_incr_rgn);
+			//m_client->m_update_tracker.flush_update(update, m_client->m_incr_rgn);
+			m_client->m_update_tracker.flush_update(update, clipregion);
 
 		//if (!m_client->m_encodemgr.m_buffer->m_desktop->IsVideoDriverEnabled())
 		//TEST if (!m_client->m_encodemgr.m_buffer->m_desktop->m_hookdriver)
@@ -795,49 +758,20 @@ vncClientUpdateThread::run_undetached(void *arg)
 		if ((m_client->m_encodemgr.m_scrinfo.framebufferHeight == m_client->m_encodemgr.m_buffer->m_scrinfo.framebufferHeight) &&
 			(m_client->m_encodemgr.m_scrinfo.framebufferWidth == m_client->m_encodemgr.m_buffer->m_scrinfo.framebufferWidth) &&
 			(m_client->m_encodemgr.m_scrinfo.format.bitsPerPixel == m_client->m_encodemgr.m_buffer->m_scrinfo.format.bitsPerPixel))
-		{
-
-			// Send updates to the client - this implicitly clears
-			// the supplied update tracker
-#ifdef _DEBUG
-			calc_updates=GetTickCount();
-			if (calc_updates==old_calc_updates) calc_updates++;
-			char			szText[256];
-			sprintf(szText,"SendUpdate %i \n", 1000 / (calc_updates-old_calc_updates));
-			if ((calc_updates - old_calc_updates)==1)
-				OutputDebugString(szText);
-			old_calc_updates=calc_updates;
-			OutputDebugString(szText);		
-#endif
+			{
 			if (m_client->SendUpdate(update)) {
 				updates_sent++;
-				m_client->m_incr_rgn.clear();
-			}
-			else
-			{
-#ifdef _DEBUG
-			char			szText[256];
-			sprintf(szText,"SendUpdate returned false \n");
-			OutputDebugString(szText);		
-#endif
+				//m_client->m_incr_rgn.clear();
+				clipregion.clear();
 			}
 		}
 		else
 		{
-#ifdef _DEBUG
-			char			szText[256];
-			sprintf(szText,"m_incr_rgn cleared 2 \n");
-			OutputDebugString(szText);		
-#endif
-			m_client->m_incr_rgn.clear();
+			//m_client->m_incr_rgn.clear();
+			clipregion.clear();
 		}
 
-			/*#ifdef _DEBUG
-//					char			szText[256];
-					sprintf(szText," ++++++ Mutex unlock clientupdatethread\n");
-					OutputDebugString(szText);		
-			#endif*/
-		}
+	}//end omni_mutex_lock l(m_client->GetUpdateLock(),82);
 
 		yield();
 	}
@@ -852,6 +786,12 @@ vncClientThread::~vncClientThread()
 {
 	if (m_client != NULL)
 		delete m_client;
+#ifdef _Gii
+#ifdef _USE_DLL
+	if (win8dllHandle) FreeLibrary(win8dllHandle);
+#endif
+	if (point_status) delete [] point_status;
+#endif
 }
 
 BOOL
@@ -870,6 +810,10 @@ vncClientThread::Init(vncClient *client, vncServer *server, VSocket *socket, BOO
 	m_AutoReconnectPort=m_server->AutoReconnectPort();
 	strcpy(m_szAutoReconnectAdr,m_server->AutoReconnectAdr());
 	strcpy(m_szAutoReconnectId,m_server->AutoReconnectId());
+#ifdef _Gii
+	point_status = NULL;
+	nr_points = 0;
+#endif
 	// Start the thread
 	start();
 
@@ -967,6 +911,44 @@ vncClientThread::InitVersion()
 
 	return TRUE;
 }
+
+#ifdef _Gii
+BOOL
+vncClientThread::InitGiiVersion()
+{
+	BOOL bReady = FALSE;
+	if (true)
+	{
+		// Generate the server's Gii protocol version
+		rfbGIIServerVersionMsg rfbGIIServerVersion;
+		rfbGIIServerVersion.header.messageType = rfbGIIMessage;
+		rfbGIIServerVersion.header.subType = rfbGIIVersionMessage; //big endian
+		//rfbGIIServerVersion.header.subType = 1;
+		rfbGIIServerVersion.header.length = 4;
+		rfbGIIServerVersion.header.length = Swap16IfLE(rfbGIIServerVersion.header.length);
+		rfbGIIServerVersion.maxVersion = rfbGIIMaxVersion;
+		rfbGIIServerVersion.maxVersion = Swap16IfLE(rfbGIIServerVersion.maxVersion);
+		rfbGIIServerVersion.minVersion = rfbGIIMinVersion;
+		rfbGIIServerVersion.minVersion = Swap16IfLE(rfbGIIServerVersion.minVersion);
+		// Send our protocol version, and get the client's protocol version
+		if (!m_socket->SendExactQueue((char *) &rfbGIIServerVersion, sz_rfbGIIServerVersionMsg))
+		{
+			vnclog.Print(LL_INTINFO, VNCLOG("Write GII Protocol Version failed"));
+			bReady = FALSE;
+		}
+		else
+		{
+			vnclog.Print(LL_INTINFO, VNCLOG("Write GII Protocol Version"));
+			bReady = TRUE;
+		}
+	}
+	else
+	{
+		vnclog.Print(LL_INTINFO, VNCLOG("Touch Support Disabled -> DOESN'T Write GII Protocol Version"));
+	}
+	return bReady;
+}
+#endif
 
 // RDV 2010-4-10
 // Ask user Permission Accept/Reject
@@ -2152,6 +2134,19 @@ bool vncClientThread::TryReconnect()
 void
 vncClientThread::run(void *arg)
 {
+#ifdef _Gii
+#ifdef _USE_DLL
+	DLL_InitializeTouchInjection = NULL;
+	DLL_PInjectTouch = NULL;
+	win8dllHandle = NULL;
+	if (VNCOS.OS_WIN8)
+	{
+		win8dllHandle = LoadLibrary("InjectTouch.dll");
+		DLL_InitializeTouchInjection = (PInitializeTouchInjection) GetProcAddress(win8dllHandle, "DLL_InitializeTouchInjection");
+		DLL_PInjectTouch = (PInjectTouch) GetProcAddress(win8dllHandle, "DLL_PInjectTouch");;
+	}
+#endif
+#endif
 	// All this thread does is go into a socket-receive loop,
 	// waiting for stuff on the given socket
 
@@ -2201,7 +2196,7 @@ vncClientThread::run(void *arg)
 				if (m_autoreconnectcounter_quit) return;
 			}
 			m_server->AutoReconnect_counter+=10;
-			if (m_server->AutoReconnect_counter>1800) m_server->AutoReconnect_counter=1800;
+			if (m_server->AutoReconnect_counter>20) m_server->AutoReconnect_counter=20;
 			vnclog.Print(LL_INTERR, VNCLOG("PostAddNewClient I\n"));
 			m_server->AutoReconnect(m_client->m_Autoreconnect);
 			m_server->AutoReconnectPort(m_AutoReconnectPort);
@@ -2534,10 +2529,14 @@ vncClientThread::run(void *arg)
 	        // RDV XOR and client detection
 			m_client->m_encodemgr.AvailableXOR(FALSE);
 			m_client->m_encodemgr.AvailableZRLE(FALSE);
+#ifdef _XZ
+			m_client->m_encodemgr.AvailableXZ(FALSE);
+#endif
 			m_client->m_encodemgr.AvailableTight(FALSE);
 
 			// sf@2002 - Tight
 			m_client->m_encodemgr.SetQualityLevel(-1);
+			m_client->m_encodemgr.SetFineQualityLevel(-1);
 			m_client->m_encodemgr.SetCompressLevel(6);
 			m_client->m_encodemgr.EnableLastRect(FALSE);
 
@@ -2556,7 +2555,9 @@ vncClientThread::run(void *arg)
 			{
 				int x;
 				BOOL encoding_set = FALSE;
-
+#ifdef _Gii
+				BOOL gii_set = FALSE;
+#endif
 				// By default, don't use copyrect!
 				m_client->m_update_tracker.enable_copyrect(false);
 
@@ -2620,6 +2621,28 @@ vncClientThread::run(void *arg)
 						int level = (int)(Swap32IfLE(encoding) - rfbEncodingQualityLevel0);
 						m_client->m_encodemgr.SetQualityLevel(level);
 						vnclog.Print(LL_INTINFO, VNCLOG("image quality level requested: %d\n"), level);
+						continue;
+					}
+
+					// Is this a FineQualityLevel encoding?
+					if ((Swap32IfLE(encoding) >= rfbEncodingFineQualityLevel0) &&
+						(Swap32IfLE(encoding) <= rfbEncodingFineQualityLevel100))
+					{
+						// Client specified fine-grained image quality level used for JPEG compression
+						int level = (int)(Swap32IfLE(encoding) - rfbEncodingFineQualityLevel0);
+						m_client->m_encodemgr.SetFineQualityLevel(level);
+						vnclog.Print(LL_INTINFO, VNCLOG("fine-grained image quality level requested: %d\n"), level);
+						continue;
+					}
+
+					// Is this a Subsamp encoding?
+					if ((Swap32IfLE(encoding) >= rfbEncodingSubsamp1X) &&
+						(Swap32IfLE(encoding) <= rfbEncodingSubsamp16X))
+					{
+						// Client specified subsampling used for JPEG compression
+						int subsamp = (int)(Swap32IfLE(encoding) - rfbEncodingSubsamp1X);
+						m_client->m_encodemgr.SetSubsampling((subsamp_type)subsamp);
+						vnclog.Print(LL_INTINFO, VNCLOG("subsampling requested: %d\n"), subsamp);
 						continue;
 					}
 
@@ -2707,6 +2730,13 @@ vncClientThread::run(void *arg)
 						vnclog.Print(LL_INTINFO, VNCLOG("ZRLE found \n"));
 						// continue;
 					}
+#ifdef _XZ
+					if (Swap32IfLE(encoding) == rfbEncodingXZ) {
+						m_client->m_encodemgr.AvailableXZ(TRUE);
+						vnclog.Print(LL_INTINFO, VNCLOG("XZ found \n"));
+						// continue;
+					}
+#endif
 
 					if (Swap32IfLE(encoding) == rfbEncodingTight) {
 						m_client->m_encodemgr.AvailableTight(TRUE);
@@ -2722,8 +2752,14 @@ vncClientThread::run(void *arg)
 						if (m_client->m_encodemgr.SetEncoding(Swap32IfLE(encoding),FALSE))
 							encoding_set = TRUE;
 					}
+#ifdef _Gii
+					if (Swap32IfLE(encoding) == rfbEncodingGII) {
+						vnclog.Print(LL_INTINFO, VNCLOG("Gii Encoding found\n"));
+						gii_set = TRUE;
+						// continue;
+					}
+#endif
 				}
-
 				// If no encoding worked then default to RAW!
 				if (!encoding_set)
 				{
@@ -2741,15 +2777,395 @@ vncClientThread::run(void *arg)
 				// (But the cache buffer (if exists) is kept intact (for XORZlib usage))
 				if (m_server->AuthClientCount() > 1)
 					m_server->DisableCacheForAllClients();
+#ifdef _Gii
+				// Gii encoding requested (MC Multitouch Extensions)
+				if (gii_set)
+				{
+					InitGiiVersion();
+				}
+#endif
 
 			}
 
 			// Re-enable updates
 			m_client->client_settings_passed=true;
 			m_client->EnableProtocol();
-
-
 			break;
+
+#ifdef _Gii
+			case rfbGIIMessage:
+			{
+				// Read the subtype and length of the message:
+				uint8_t subType;
+				uint16_t lengthMsg;
+				bool bigEndian = false;
+				omni_mutex_lock ll(m_client->GetUpdateLock(), 776);
+				if (!m_socket->ReadExact((char *) &subType, sizeof(subType)))
+				{
+					vnclog.Print(LL_INTERR, VNCLOG("GII:Extension Reading subtype failed !\n"));
+					m_client->cl_connected = FALSE;
+					break;
+				}
+				if (!m_socket->ReadExact((char *) &lengthMsg, sizeof(lengthMsg)))
+				{
+					vnclog.Print(LL_INTERR, VNCLOG("GII:Extension Reading length failed !\n"));
+					m_client->cl_connected = FALSE;
+					break;
+				}
+				//unmask big endian flag
+				if (subType & 0x80)
+				{
+					bigEndian = true;
+					//format is big endian, convert to multi byte data to little
+					lengthMsg = Swap16IfLE(lengthMsg);
+					//mask subtype
+					subType &= 0x7f;
+				}
+				// process Gii Message
+				switch (subType) {
+				case _rfbGIIEventInjection:
+				{
+					rfbGIIValuatorEventMsg rfbGIIValutorEvent;
+					rfbGIIValutorEvent.header.messageType = rfbGIIMessage;
+					rfbGIIValutorEvent.header.subType = subType;
+					rfbGIIValutorEvent.header.length = lengthMsg;
+					// read rest of client's inject data
+					if (!m_socket->ReadExact((char *) (&rfbGIIValutorEvent) + sz_rfbGIIMsgHeader, sizeof(rfbGIIValutorEvent) - sz_rfbGIIMsgHeader))
+					{
+						vnclog.Print(LL_INTERR, VNCLOG("GIIExtension reading client creation failed\n"));
+						m_client->cl_connected = FALSE;
+						break;
+					}
+					if (bigEndian)
+					{
+						rfbGIIValutorEvent.padding = Swap16IfLE(rfbGIIValutorEvent.padding);
+						rfbGIIValutorEvent.deviceOrigin = Swap32IfLE(rfbGIIValutorEvent.deviceOrigin);
+						rfbGIIValutorEvent.first = Swap32IfLE(rfbGIIValutorEvent.first);
+						rfbGIIValutorEvent.count = Swap32IfLE(rfbGIIValutorEvent.count);
+					}
+					/////////////////////////////////////////////////////////////////////////////////////////
+					/////////////////////////////////////////////////////////////////////////////////////////
+					/////////////////////////////////////////////////////////////////////////////////////////
+#ifdef _USE_DLL
+					if (DLL_PInjectTouch)
+#endif
+					{
+						MyTouchINfo *TI = NULL;
+						TI = new MyTouchINfo[rfbGIIValutorEvent.first];
+						//POINTER_TOUCH_INFO contact[10];
+						//memset(&contact, 0, sizeof(POINTER_TOUCH_INFO) * 10);
+						BOOL bRet = TRUE;
+						char			szText[256];
+
+
+						for (unsigned int j = 0; j < rfbGIIValutorEvent.first; j++)
+						{
+							DWORD ValuatorFlag = 0;
+							DWORD ValuatorTouch_Id = 0;
+							DWORD ValuatorTouch_Position16XY = 0;
+							DWORD ValuatorTouch_Area = 0;
+							DWORD ValuatorTouch_Pressure = 0;
+							DWORD ValuatorTime_msec = 0;
+							DWORD64 ValuatorTime_usec = 0;
+
+							if (!m_socket->ReadExact((char *) &ValuatorFlag, sizeof(DWORD))){
+								vnclog.Print(LL_INTERR, VNCLOG("GIIExtension reading TouchINfo failed\n"));
+								m_client->cl_connected = FALSE;
+								break;
+							}
+							if (bigEndian) ValuatorFlag = Swap32IfLE(ValuatorFlag);
+
+							if (!m_socket->ReadExact((char *) &ValuatorTouch_Id, sizeof(DWORD))){
+								vnclog.Print(LL_INTERR, VNCLOG("GIIExtension reading TouchINfo failed\n"));
+								m_client->cl_connected = FALSE;
+								break;
+							}
+							if (bigEndian) ValuatorTouch_Id = Swap32IfLE(ValuatorTouch_Id);
+							TI[j].TouchId = ValuatorTouch_Id;
+
+							if (!m_socket->ReadExact((char *) &ValuatorTouch_Position16XY, sizeof(DWORD))){
+								vnclog.Print(LL_INTERR, VNCLOG("GIIExtension reading TouchINfo failed\n"));
+								m_client->cl_connected = FALSE;
+								break;
+							}
+							if (bigEndian) ValuatorTouch_Position16XY = Swap32IfLE(ValuatorTouch_Position16XY);
+							if (ValuatorFlag & LANGE_16_flag)
+							{
+								TI[j].X = ((ValuatorTouch_Position16XY & 0xffff0000) >> 16);
+								TI[j].Y = ((ValuatorTouch_Position16XY & 0x0000ffff));
+							}
+							else
+							{
+								vnclog.Print(LL_INTERR, VNCLOG("Only 16bit XT supported\n"));
+								m_client->cl_connected = FALSE;
+								break;
+							}
+
+							if (ValuatorFlag & S1_flag)
+							{
+								if (!m_socket->ReadExact((char *) &ValuatorTouch_Area, sizeof(DWORD))){
+									vnclog.Print(LL_INTERR, VNCLOG("GIIExtension reading TouchINfo failed\n"));
+									m_client->cl_connected = FALSE;
+									break;
+								}
+								if (bigEndian) ValuatorTouch_Area = Swap32IfLE(ValuatorTouch_Area);
+								TI[j].ContactWidth = ((ValuatorTouch_Area & 0xffff0000) >> 16);
+								TI[j].ContactHeight = ((ValuatorTouch_Area & 0x0000ffff));
+							}
+							else
+							{
+								TI[j].ContactWidth = 4;
+								TI[j].ContactHeight = 4;
+							}
+
+							if (ValuatorFlag &PR_flag)
+								if (!m_socket->ReadExact((char *) &ValuatorTouch_Pressure, sizeof(DWORD))){
+								vnclog.Print(LL_INTERR, VNCLOG("GIIExtension reading TouchINfo failed\n"));
+								m_client->cl_connected = FALSE;
+								break;
+								}
+							if (bigEndian) ValuatorTouch_Pressure = Swap32IfLE(ValuatorTouch_Pressure);
+
+							if (ValuatorFlag &TI_flag)
+								if (!m_socket->ReadExact((char *) &ValuatorTime_msec, sizeof(DWORD))){
+								vnclog.Print(LL_INTERR, VNCLOG("GIIExtension reading TouchINfo failed\n"));
+								m_client->cl_connected = FALSE;
+								break;
+								}
+							if (bigEndian) ValuatorTime_msec = Swap32IfLE(ValuatorTime_msec);
+
+							if (ValuatorFlag &HC_flag)
+								if (!m_socket->ReadExact((char *) &ValuatorTime_usec, sizeof(DWORD64))){
+								vnclog.Print(LL_INTERR, VNCLOG("GIIExtension reading TouchINfo failed\n"));
+								m_client->cl_connected = FALSE;
+								break;
+								}
+							int endianTest = 1;
+							if (bigEndian) ValuatorTime_usec = Swap64IfLE(ValuatorTime_usec);
+
+							TI[j].pointerflag = POINTER_FLAG_NONE;
+
+							if (TI[j].TouchId < nr_points)  // protect point_status array, else wronf value crash
+							{
+								if (ValuatorFlag & PF_flag)
+								{
+									if (point_status[TI[j].TouchId] == 1)
+									{
+										//move
+										TI[j].pointerflag |= POINTER_FLAG_UPDATE;
+										TI[j].pointerflag |= POINTER_FLAG_INRANGE | POINTER_FLAG_INCONTACT;
+									}
+									else
+									{
+										//down
+										TI[j].pointerflag |= POINTER_FLAG_DOWN;
+										TI[j].pointerflag |= POINTER_FLAG_INRANGE | POINTER_FLAG_INCONTACT;
+										point_status[TI[j].TouchId] = 1;
+
+									}
+								}
+								else
+								{
+									// UP
+									TI[j].pointerflag |= POINTER_FLAG_UP;
+									point_status[TI[j].TouchId] = 0;
+								}
+							}
+
+							TI[j].time = 0;
+						}
+#ifdef _USE_DLL
+						bRet = DLL_PInjectTouch(rfbGIIValutorEvent.first, TI);
+#ifdef _DEBUG					
+						if (bRet == 0) sprintf(szText, "FAIL index %d %i\n", GetLastError(), rfbGIIValutorEvent.first);
+						else sprintf(szText, "OK %i\n", rfbGIIValutorEvent.first);
+						OutputDebugString(szText);
+#endif
+#else
+						//////////////////////////////////////////////////
+						// Copy src from dll
+						//////////////////////////////////////////////////
+						MyTouchINfo *ti_array = TI;
+						if (rfbGIIValutorEvent.first < 0 || rfbGIIValutorEvent.first >254) goto mydllend;
+						POINTER_TOUCH_INFO *contact = new POINTER_TOUCH_INFO[rfbGIIValutorEvent.first];
+						if (contact == NULL)  goto mydllend;
+						memset(contact, 0, sizeof(POINTER_TOUCH_INFO) * rfbGIIValutorEvent.first);
+
+						for (int i = 0; i < rfbGIIValutorEvent.first; i++)
+						{
+							contact[i].pointerInfo.pointerType = PT_TOUCH; //we're sending touch input		
+							contact[i].pointerInfo.ptPixelLocation.x = ti_array[i].X;
+							contact[i].pointerInfo.ptPixelLocation.y = ti_array[i].Y;
+
+							contact[i].pointerInfo.dwTime = ti_array[i].time;
+
+							contact[i].touchFlags = TOUCH_FLAG_NONE;
+							contact[i].touchMask = TOUCH_MASK_CONTACTAREA | TOUCH_MASK_ORIENTATION | TOUCH_MASK_PRESSURE;
+							contact[i].orientation = 90;
+							contact[i].pressure = 32000;
+
+							contact[i].rcContact.top = contact[i].pointerInfo.ptPixelLocation.y - ti_array[i].ContactHeight / 2;
+							contact[i].rcContact.bottom = contact[i].pointerInfo.ptPixelLocation.y + ti_array[i].ContactHeight / 2;
+							contact[i].rcContact.left = contact[i].pointerInfo.ptPixelLocation.x - ti_array[i].ContactWidth / 2;
+							contact[i].rcContact.right = contact[i].pointerInfo.ptPixelLocation.x + ti_array[i].ContactWidth / 2;
+
+							contact[i].pointerInfo.pointerId = ti_array[i].TouchId;          //contact 0
+							contact[i].pointerInfo.pointerFlags = ti_array[i].pointerflag;
+						}
+						BOOL value = InjectTouchInput(rfbGIIValutorEvent.first, contact);
+#ifdef _DEBUG					
+						if (value == 0) sprintf(szText, "FAIL index %d %i\n", GetLastError(), rfbGIIValutorEvent.first);
+						else sprintf(szText, "OK number points %i\n", rfbGIIValutorEvent.first);
+						OutputDebugString(szText);
+#endif
+						delete []contact;
+					mydllend:
+						//////////////////////////////////////////////////
+#endif					
+						if (TI) delete []TI;
+					}
+					/////////////////////////////////////////////////////////////////////////////////////////
+					/////////////////////////////////////////////////////////////////////////////////////////
+					/////////////////////////////////////////////////////////////////////////////////////////
+				}
+					break;
+
+				case _rfbGIIVersionMessage:
+				{
+					uint16_t clientVersion;
+					//check length
+					vnclog.Print(LL_INTINFO, VNCLOG("GII: Get Subtype _rfbGIIVersionMessage \n"));
+					if (lengthMsg != sizeof(clientVersion))
+					{
+						vnclog.Print(LL_INTERR, VNCLOG("GII:Extension invalid length: %d\n"), clientVersion);
+						m_client->cl_connected = FALSE;
+						break;
+					}
+					// read client's version info and process
+					if (!m_socket->ReadExact((char *) &clientVersion, sizeof(clientVersion)))
+					{
+						vnclog.Print(LL_INTERR, VNCLOG("GIIExtension reading client version failed\n"));
+						m_client->cl_connected = FALSE;
+						break;
+					}
+					if (bigEndian)
+					{
+						clientVersion = Swap16IfLE(clientVersion);
+					}
+					if ((clientVersion < rfbGIIMinVersion || clientVersion > rfbGIIMaxVersion))           //TBR
+					{
+						vnclog.Print(LL_INTERR, VNCLOG("GII: Extension client version invalid number: %d\n"), clientVersion);
+						m_client->cl_connected = FALSE;
+						break;
+					}
+					break;
+				}
+
+				case _rfbGIIDeviceCreation:
+				{
+					rfbGIIClientDeviceCreationMsg rfbGIIClientDeviceCreation;
+					//prepare already known data 
+					omni_mutex_lock ll(m_client->GetUpdateLock(), 777);
+					vnclog.Print(LL_INTINFO, VNCLOG("GII: Get Subtype _rfbGIIDeviceCreation \n"));
+					rfbGIIClientDeviceCreation.header.messageType = rfbGIIMessage;
+					rfbGIIClientDeviceCreation.header.subType = subType;
+					rfbGIIClientDeviceCreation.header.length = lengthMsg;
+					// read rest of client's creation data
+					if (!m_socket->ReadExact((char *) (&rfbGIIClientDeviceCreation) + sz_rfbGIIMsgHeader, sizeof(rfbGIIClientDeviceCreation) - sz_rfbGIIMsgHeader))
+					{
+						vnclog.Print(LL_INTERR, VNCLOG("GIIExtension reading client creation failed\n"));
+						m_client->cl_connected = FALSE;
+						break;
+					}
+					if (bigEndian)
+					{
+						rfbGIIClientDeviceCreation.vendorID = Swap32IfLE(rfbGIIClientDeviceCreation.vendorID);
+						rfbGIIClientDeviceCreation.productID = Swap32IfLE(rfbGIIClientDeviceCreation.productID);
+						rfbGIIClientDeviceCreation.eventMask = Swap32IfLE(rfbGIIClientDeviceCreation.eventMask);
+						rfbGIIClientDeviceCreation.numRegisters = Swap32IfLE(rfbGIIClientDeviceCreation.numRegisters);
+						rfbGIIClientDeviceCreation.numValuators = Swap32IfLE(rfbGIIClientDeviceCreation.numValuators);
+						rfbGIIClientDeviceCreation.numButtons = Swap32IfLE(rfbGIIClientDeviceCreation.numButtons);                                                                                                         rfbGIIClientDeviceCreation.vendorID = Swap32IfLE(rfbGIIClientDeviceCreation.vendorID);
+					}
+					if (rfbGIIClientDeviceCreation.numValuators == 0 || rfbGIIClientDeviceCreation.numValuators > 10)
+					{
+						vnclog.Print(LL_INTERR, VNCLOG("GIIExtension reading device creation, invalid amount of valuators\n"));
+						m_client->cl_connected = FALSE;
+						break;
+					}
+					else
+					{
+						//read all valutor 
+						rfbGIIValuatorMsg rfbGIIValutor;
+						for (unsigned int i = 0; i < rfbGIIClientDeviceCreation.numValuators; i++)
+						{
+							if (!m_socket->ReadExact((char *) &rfbGIIValutor, sizeof(rfbGIIValutor)))
+							{
+								vnclog.Print(LL_INTERR, VNCLOG("GIIExtension reading device creation valuators failed\n"));
+								m_client->cl_connected = FALSE;
+								break;
+							}
+							else
+							{
+								if (bigEndian)
+								{
+									rfbGIIValutor.index = Swap32IfLE(rfbGIIValutor.index);
+									rfbGIIValutor.rangeMin = Swap32IfLE(rfbGIIValutor.rangeMin);
+									rfbGIIValutor.rangeCenter = Swap32IfLE(rfbGIIValutor.rangeCenter);
+									rfbGIIValutor.rangeMax = Swap32IfLE(rfbGIIValutor.rangeMax);
+									rfbGIIValutor.SIUnit = Swap32IfLE(rfbGIIValutor.SIUnit);
+									rfbGIIValutor.SIAdd = Swap32IfLE(rfbGIIValutor.SIAdd);
+									rfbGIIValutor.SIMul = Swap32IfLE(rfbGIIValutor.SIMul);
+									rfbGIIValutor.SIDiv = Swap32IfLE(rfbGIIValutor.SIDiv);
+									rfbGIIValutor.SIShift = Swap32IfLE(rfbGIIValutor.SIShift);
+								}
+								//send device origin //TBR 
+								BOOL bReady = FALSE;
+								rfbGIIServerDeviceCreationMsg rfbGIIServerDeviceCreation;
+								// Generate the server's creation message
+								rfbGIIServerDeviceCreation.header.messageType = rfbGIIMessage;
+								rfbGIIServerDeviceCreation.header.subType = rfbGIIDeviceCreation;
+								//rfbGIIServerDeviceCreation.header.subType =  2; //no use of little endian
+								rfbGIIServerDeviceCreation.header.length = 4;
+								rfbGIIServerDeviceCreation.header.length = Swap16IfLE(rfbGIIServerDeviceCreation.header.length);
+								rfbGIIServerDeviceCreation.deviceOrigin = 1;       //TBR
+								rfbGIIServerDeviceCreation.deviceOrigin = Swap32IfLE(rfbGIIServerDeviceCreation.deviceOrigin);
+								// Send our protocol version, and get the client's protocol version
+
+								vnclog.Print(LL_INTERR, VNCLOG("GIIExtension writing device creation\n"));
+								if (!m_socket->SendExactQueue((char *) &rfbGIIServerDeviceCreation, sz_rfbGIIServerDeviceCreationMsg))
+								{
+									vnclog.Print(LL_INTERR, VNCLOG("GIIExtension writing device creation failed\n"));
+									m_client->cl_connected = FALSE;
+									break;
+								}
+
+#ifdef _USE_DLL					   
+								if (DLL_InitializeTouchInjection) DLL_InitializeTouchInjection(rfbGIIClientDeviceCreation.numButtons);
+#else
+								InitializeTouchInjection(rfbGIIClientDeviceCreation.numButtons, TOUCH_FEEDBACK_DEFAULT);
+#endif
+								nr_points = rfbGIIClientDeviceCreation.numButtons;
+								if (nr_points>0 && nr_points<254) point_status = new bool[nr_points];
+							}
+						}
+					}
+					break;
+				}
+
+				case _rfbGIIDeviceDestruction:
+					//not yet implemented
+					vnclog.Print(LL_INTERR, VNCLOG("GIIExtension writing device creation failed\n"));
+					m_client->cl_connected = FALSE;
+					break;
+
+				default:
+					vnclog.Print(LL_INTERR, VNCLOG("GII: Extension invalid subtype: %d\n"), subType);
+					m_client->cl_connected = FALSE;
+					break;
+				}
+			}
+				break;
+#endif
 			
 		case rfbFramebufferUpdateRequest:
 			// Read the rest of the message:
@@ -4000,50 +4416,6 @@ vncClientThread::run(void *arg)
 			}
 			break;
 
-			// Modif cs@2005
-#ifdef DSHOW
-		case rfbKeyFrameRequest:
-			{
-				MutexAutoLock l_Lock(&m_client->m_hmtxEncodeAccess);
-
-				omni_mutex_lock l(m_client->GetUpdateLock());
-
-				if(m_client->m_encodemgr.ResetZRLEEncoding())
-				{
-					rfb::Rect update;
-
-					rfb::Rect ViewerSize = m_client->m_encodemgr.m_buffer->GetViewerSize();
-
-					update.tl.x = 0;
-					update.tl.y = 0;
-					update.br.x = ViewerSize.br.x;
-					update.br.y = ViewerSize.br.y;
-					rfb::Region2D update_rgn = update;
-
-					// Add the requested area to the incremental update cliprect
-					m_client->m_incr_rgn.assign_union(update_rgn);
-
-					// Yes, so add the region to the update tracker
-					m_client->m_update_tracker.add_changed(update_rgn);
-					
-					// Tell the desktop grabber to fetch the region's latest state
-					m_client->m_encodemgr.m_buffer->m_desktop->QueueRect(update);
-
-					// Kick the update thread (and create it if not there already)
-					m_client->TriggerUpdateThread();
-
-					// Send a message back to the client to confirm that we have reset the zrle encoding			
-					rfbKeyFrameUpdateMsg header;
-					header.type = rfbKeyFrameUpdate;
-					m_client->SendRFBMsg(rfbKeyFrameUpdate, (BYTE *)&header, sz_rfbKeyFrameUpdateMsg);
-				}				
-				else
-				{
-					vnclog.Print(LL_INTERR, VNCLOG("[rfbKeyFrameRequest] Unable to Reset ZRLE Encoding\n"));
-				}
-			}
-			break;
-#endif
 		// adzm 2010-09 - Notify streaming DSM plugin support
         case rfbNotifyPluginStreaming:
             if (sz_rfbNotifyPluginStreamingMsg > 1)
@@ -4185,7 +4557,7 @@ vncClient::vncClient() : Sendinput("USER32", "SendInput"), m_clipboard(Clipboard
 	m_ptrevent.y=0;
 
 	// Other misc flags
-	m_thread = NULL;
+	m_thread_ClientThread = NULL;
 	m_palettechanged = FALSE;
 
 	// Initialise the two update stores
@@ -4269,17 +4641,6 @@ vncClient::vncClient() : Sendinput("USER32", "SendInput"), m_clipboard(Clipboard
 	m_IsLoopback=false;
 	m_NewSWUpdateWaiting=false;
 	client_settings_passed=false;
-/*	roundrobin_counter=0;
-	for (int i=0;i<rfbEncodingZRLE+1;i++)
-		for (int j=0;j<31;j++)
-		{
-		  timearray[i][j]=0;
-		  sizearray[i][j]=0;
-		}*/
-// Modif cs@2005
-#ifdef DSHOW
-	m_hmtxEncodeAccess = CreateMutex(NULL, FALSE, NULL);
-#endif
     m_wants_ServerStateUpdates =  false;
     m_bClientHasBlockedInput = false;
 	m_Support_rfbSetServerInput = false;
@@ -4304,7 +4665,7 @@ vncClient::vncClient() : Sendinput("USER32", "SendInput"), m_clipboard(Clipboard
 
 vncClient::~vncClient()
 {
-
+	cl_connected = false;
 	vnclog.Print(LL_INTINFO, VNCLOG("~vncClient() executing...\n"));
 
 	// Modif sf@2002 - Text Chat
@@ -4342,14 +4703,6 @@ vncClient::~vncClient()
 			delete [] m_pCacheZipBuf;
 			m_pCacheZipBuf = NULL;
 		}
-	// adzm - 2010-07 - Extended clipboard
-	/*if (m_clipboard_text) {
-		free(m_clipboard_text);
-	}*/
-// Modif cs@2005
-#ifdef DSHOW
-	CloseHandle(m_hmtxEncodeAccess);
-#endif
 	if (m_lpCSBuffer)
 		delete [] m_lpCSBuffer;
 	if (m_pBuff)
@@ -4381,6 +4734,21 @@ vncClient::~vncClient()
 	if (m_szHost) {
 		free(m_szHost);
 	}
+	if (m_updatethread) {
+		m_updatethread->Kill();
+		m_updatethread->join(NULL);
+	}
+
+	int counter = 0;
+	while (m_updatethread != NULL)
+	{
+		char			szText[256];
+		sprintf(szText, " m_updatethread != NULL \n");
+		OutputDebugString(szText);
+		Sleep(100);
+		counter++;
+		if (counter == 30) break;
+	}
 }
 
 // Init
@@ -4408,10 +4776,10 @@ vncClient::Init(vncServer *server,
 	m_id = newid;
 
 	// Spawn the child thread here
-	m_thread = new vncClientThread;
-	if (m_thread == NULL)
+	m_thread_ClientThread = new vncClientThread;
+	if (m_thread_ClientThread == NULL)
 		return FALSE;
-	return ((vncClientThread *)m_thread)->Init(this, m_server, m_socket, auth, shared);
+	return ((vncClientThread *) m_thread_ClientThread)->Init(this, m_server, m_socket, auth, shared);
 
 	return FALSE;
 }
@@ -4495,15 +4863,11 @@ vncClient::NotifyUpdate(rfbFramebufferUpdateRequestMsg fur)
 		}
 
 		{
-			omni_mutex_lock l(GetUpdateLock(),92);
+			// lock removed, clipregion solve unwanted m_incr_rgn clear
+			//omni_mutex_lock l(GetUpdateLock(),92);
 
 	     	// Add the requested area to the incremental update cliprect
 			m_incr_rgn.assign_union(update_rgn);
-#ifdef _DEBUG
-			char			szText[256];
-			sprintf(szText,"m_incr_rgn \n");
-			OutputDebugString(szText);		
-#endif
 			// Is this request for a full update?
 			if (!fur.incremental)
 			{
@@ -4945,15 +5309,17 @@ vncClient::SendUpdate(rfb::SimpleUpdateTracker &update)
 BOOL
 vncClient::SendRectangles(const rfb::RectVector &rects)
 {
-	// Modif cs@2005
-#ifdef DSHOW
-	MutexAutoLock l_Lock(&m_hmtxEncodeAccess);
-#endif
 	rfb::RectVector::const_iterator i;
 	rfb::Rect rect;
 	int x,y;
 	int Blocksize=254;
 	int BlocksizeX=254;
+
+#ifdef _XZ
+	if (m_encodemgr.IsBulkRectEncoding()) {
+		return m_encodemgr.EncodeBulkRects(rects, m_nScale, m_socket);
+	}
+#endif
 
 
 	// Work through the list of rectangles, sending each one

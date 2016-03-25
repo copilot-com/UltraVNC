@@ -81,7 +81,23 @@ class vncClientUpdateThread;
 #define FT_PROTO_VERSION_2   2  // base ft protocol
 #define FT_PROTO_VERSION_3   3  // new ft protocol session messages
 
-
+#ifdef _Gii
+struct MyTouchINfo
+{
+	DWORD TouchId;
+	DWORD pointerflag;
+	DWORD touchmask;
+	int X;
+	int Y;
+	int ContactWidth;
+	int ContactHeight;
+	DWORD time;
+};
+#ifdef _USE_DLL
+typedef BOOL(__cdecl*PInitializeTouchInjection)(int);
+typedef BOOL(__cdecl*PInjectTouch)(int points, MyTouchINfo *ti_array);
+#endif
+#endif
 
 extern int CheckUserGroupPasswordUni(char * userin,char *password,const char *machine);
 
@@ -413,7 +429,7 @@ protected:
 	char			*m_client_name;
 
 	// The client thread
-	omni_thread		*m_thread;
+	omni_thread		*m_thread_ClientThread;
 
 	// adzm 2009-07-05
 	char*			m_szRepeaterID;
@@ -530,10 +546,6 @@ protected:
 	int totalraw;
 
     helper::DynamicFn<pSendinput> Sendinput;
-	// Modif cs@2005
-#ifdef DSHOW
-	HANDLE m_hmtxEncodeAccess;
-#endif
 
     std::string m_OrigSourceDirectoryName;
     bool        m_wants_ServerStateUpdates;
@@ -560,6 +572,9 @@ public:
 
 	// Sub-Init routines
 	virtual BOOL InitVersion();
+#ifdef _Gii
+	BOOL InitGiiVersion();
+#endif
 	virtual BOOL InitAuthenticate();
 	virtual BOOL AuthenticateClient(std::vector<CARD8>& current_auth);
 	virtual BOOL AuthenticateLegacyClient();
@@ -603,5 +618,14 @@ protected:
 	BOOL m_ms_logon;
 	int m_major;
 	int m_minor;
+#ifdef _Gii
+#ifdef _USE_DLL
+	PInitializeTouchInjection DLL_InitializeTouchInjection;
+	PInjectTouch DLL_PInjectTouch;
+	HMODULE win8dllHandle;
+#endif
+	bool *point_status;
+	DWORD nr_points;
+#endif
 };
 #endif
