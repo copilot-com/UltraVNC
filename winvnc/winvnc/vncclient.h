@@ -138,6 +138,7 @@ public:
 	virtual void UpdateClipTextEx(ClipboardData& clipboardData, CARD32 overrideFlags = 0);
 	virtual void UpdatePalette(bool lock);
 	virtual void UpdateLocalFormat(bool lock);
+	int nr_incr_rgn_empty;
 
 	// Is the client waiting on an update?
 	// YES IFF there is an incremental update region,
@@ -152,10 +153,25 @@ public:
 											m_incr_rgn.intersect(m_update_tracker.get_copied_region()).is_empty());
 										OutputDebugString(szText);		
 #endif
-		return  !m_incr_rgn.is_empty() &&
-			m_incr_rgn.intersect(m_update_tracker.get_changed_region()).is_empty() &&
+		BOOL value =!m_incr_rgn.is_empty() &&m_incr_rgn.intersect(m_update_tracker.get_changed_region()).is_empty() &&
 			m_incr_rgn.intersect(m_update_tracker.get_cached_region()).is_empty() &&
 			m_incr_rgn.intersect(m_update_tracker.get_copied_region()).is_empty();
+		if (m_incr_rgn.is_empty())
+		{
+			nr_incr_rgn_empty++;
+			if (nr_incr_rgn_empty > 300)
+			{
+				nr_incr_rgn_empty=0;				
+				rfbFramebufferUpdateRequestMsg fur;
+				fur.x = 0;
+				fur.y = 0;
+				fur.w = 10;
+				fur.h = 10;
+				NotifyUpdate(fur);
+			}
+		}
+		else nr_incr_rgn_empty = 0;
+		return value;
 
 	};
 
@@ -204,6 +220,7 @@ public:
 	virtual long GetConnectTime() {return m_lConnectTime;};
 	virtual bool IsSlowEncoding() {return m_encodemgr.IsSlowEncoding();};
 	virtual bool IsUltraEncoding() {return m_encodemgr.IsUltraEncoding();};
+	virtual bool IsEncoderSet() { return m_encodemgr.IsEncoderSet(); };
 	virtual bool IsFileTransBusy(){return (m_fFileUploadRunning||m_fFileDownloadRunning || m_fFileSessionOpen);};
 	void SetProtocolVersion(rfbProtocolVersionMsg *protocolMsg);
 	void Clear_Update_Tracker();

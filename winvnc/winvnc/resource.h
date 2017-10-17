@@ -172,6 +172,7 @@
 #define IDC_JAP_INPUTS                  1122
 #define IDC_CHECK3                      1123
 #define IDC_EURO                        1123
+#define IDC_RDPMODE                     1123
 #define IDC_VIDEO                       1125
 #define IDC_BUTTON1                     1126
 #define IDC_CLEAR                       1126
@@ -180,6 +181,8 @@
 #define IDC_CAPTION_STATIC              1129
 #define IDC_ACCEPTLOGO                  1131
 #define IDC_Path1                       1132
+#define IDC_CHECK4                      1132
+#define IDC_IPV6                        1132
 #define IDC_Path2                       1133
 #define IDC_Path3                       1134
 #define IDC_LOCALTEXT_EDIT              1140
@@ -278,7 +281,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        170
 #define _APS_NEXT_COMMAND_VALUE         40030
-#define _APS_NEXT_CONTROL_VALUE         1132
+#define _APS_NEXT_CONTROL_VALUE         1133
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

@@ -21,7 +21,7 @@
 // http://www.uvnc.com/
 //
 ////////////////////////////////////////////////////////////////////////////
-
+#include "stdhdrs.h"
 #include "vncEncodeUltra.h"
 
 #define IN_LEN		(128*1024)
@@ -216,10 +216,10 @@ vncEncodeUltra::EncodeOneRect(BYTE *source, BYTE *dest, const RECT &rect,VSocket
 			delete [] m_buffer;
 			m_buffer = NULL;
 		}
-		m_buffer = new BYTE [rawDataSize+1];
+		m_buffer = new BYTE [rawDataSize+1000];
 		if (m_buffer == NULL)
 			return vncEncoder::EncodeRect(source, dest, rect);
-		m_bufflen = rawDataSize;
+		m_bufflen = rawDataSize+999;
 	}
 	// Translate the data into our new buffer
 	Translate(source, m_buffer, rect);

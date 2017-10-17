@@ -31,6 +31,7 @@
 
 #pragma once
 #include "stdhdrs.h"
+#include <winsock2.h>
 #include <windows.h>
 #include <tchar.h>
 
@@ -61,6 +62,11 @@ public:
     // Remove the item with the given index.
     // If this is greater than NumItems()-1 it will be ignored.
     void RemoveItem(int index);
+	void SetPos(LPTSTR txt, int x, int y, int w, int h);
+	int Get_x(LPTSTR txt);
+	int Get_y(LPTSTR txt);
+	int Get_w(LPTSTR txt);
+	int Get_h(LPTSTR txt);
 
 	virtual ~MRU();
 

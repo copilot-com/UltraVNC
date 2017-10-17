@@ -83,7 +83,10 @@ static HHOOK hCallWndHook = NULL;							// Handle to the CallWnd hook
 static HHOOK hGetMsgHook = NULL;							// Handle to the GetMsg hook
 static HHOOK hDialogMsgHook = NULL;						// Handle to the DialogMsg hook
 static HHOOK hLLKeyboardHook = NULL;						// Handle to LowLevel kbd hook
-static HHOOK hLLMouseHook = NULL;							// Handle to LowLevel mouse hook
+static HHOOK hLLMouseHook = NULL;							// Handle to LowLevel mouse hookT
+static HANDLE filemapping = NULL;
+static BOOL isAttached = FALSE;
+
 
 /////////////////////////////////////////////////////////////////////////////
 // Per-instance DLL variables
@@ -136,7 +139,7 @@ BOOL ExitInstance();
 // The DLL's main procedure
 BOOL WINAPI DllMain (HANDLE hInst, ULONG ul_reason_for_call, LPVOID lpReserved)
 {
-	HANDLE filemapping = NULL;
+   HANDLE filemapping = NULL;
 	// Find out why we're being called
 	switch (ul_reason_for_call)
 	{
@@ -175,14 +178,13 @@ BOOL WINAPI DllMain (HANDLE hInst, ULONG ul_reason_for_call, LPVOID lpReserved)
 				return FALSE;
 			}
 
-
-
-
 		// Save the instance handle
 		hInstance = (HINSTANCE)hInst;
 
 		// Call the initialisation function
 		appHookedOK = InitInstance();
+
+      isAttached = TRUE;
 
 		// ALWAYS return TRUE to avoid breaking unhookable applications!!!
 		return TRUE;
@@ -192,11 +194,18 @@ BOOL WINAPI DllMain (HANDLE hInst, ULONG ul_reason_for_call, LPVOID lpReserved)
 		_RPT0(_CRT_WARN, "vncHooks : Hook DLL unloaded\n");
 #endif
 		
-		// Call the exit function
-		// If the app failed to hook OK, ExitInstance will still operate OK (hopefully...)
-		ExitInstance();
-		UnmapViewOfFile(g_shdata);
-		if (filemapping)CloseHandle(filemapping);
+      //lpReserved > 0 if owner process is about to exit/terminate
+      //in this case, no handles should be closed, because an entry point of the DLL can be called
+     if ( NULL == lpReserved )
+      {
+         //lpReserved == 0 if DLL is unloaded,
+         // Call the exit function
+		   // If the app failed to hook OK, ExitInstance will still operate OK (hopefully...)
+		   ExitInstance();
+		   if (g_shdata) UnmapViewOfFile(g_shdata);
+		   if (filemapping)CloseHandle(filemapping);
+      }
+      isAttached = FALSE;
 
 		return TRUE;
 
@@ -806,16 +815,19 @@ inline BOOL HookHandle(UINT MessageId, HWND hWnd, WPARAM wParam, LPARAM lParam)
 
 LRESULT CALLBACK CallWndProc(int nCode, WPARAM wParam, LPARAM lParam)
 {
-	// Do we have to handle this message?
-	if (nCode == HC_ACTION)
-	{
-		// Process the hook if the WinVNC thread ID is valid
-		if ( g_shdata->vnc_thread_id)
-		{
-			CWPSTRUCT *cwpStruct = (CWPSTRUCT *) lParam;
-			HookHandle(cwpStruct->message, cwpStruct->hwnd, cwpStruct->wParam, cwpStruct->lParam);
-		}
-	}
+   if (isAttached)
+   {
+      // Do we have to handle this message?
+	   if (nCode == HC_ACTION)
+	   {
+		   // Process the hook if the WinVNC thread ID is valid
+		   if ( g_shdata->vnc_thread_id)
+		   {
+			   CWPSTRUCT *cwpStruct = (CWPSTRUCT *) lParam;
+			   HookHandle(cwpStruct->message, cwpStruct->hwnd, cwpStruct->wParam, cwpStruct->lParam);
+		   }
+	   }
+   }
 
 	// Call the next handler in the chain
     return CallNextHookEx (hCallWndHook, nCode, wParam, lParam);
@@ -825,24 +837,27 @@ LRESULT CALLBACK CallWndProc(int nCode, WPARAM wParam, LPARAM lParam)
 
 LRESULT CALLBACK GetMessageProc(int nCode, WPARAM wParam, LPARAM lParam)
 {
-	// Do we have to handle this message?
-	if (nCode == HC_ACTION)
-	{
-		// Process the hook only if the WinVNC thread id is valid
-		if ( g_shdata->vnc_thread_id)
-		{
-			MSG *msg = (MSG *) lParam;
+   if (isAttached)
+   {
+      // Do we have to handle this message?
+	   if (nCode == HC_ACTION)
+	   {
+		   // Process the hook only if the WinVNC thread id is valid
+		   if ( g_shdata->vnc_thread_id)
+		   {
+			   MSG *msg = (MSG *) lParam;
 
-			// Only handle application messages if they're being removed:
-			if (wParam & PM_REMOVE)
-			{
-				// Handle the message
-				if (m_ddihook)
-				HookHandleddi(msg->message, msg->hwnd, msg->wParam, msg->lParam);
-				else HookHandle(msg->message, msg->hwnd, msg->wParam, msg->lParam);
-			}
-		}
-	}
+			   // Only handle application messages if they're being removed:
+			   if (wParam & PM_REMOVE)
+			   {
+				   // Handle the message
+				   if (m_ddihook)
+				   HookHandleddi(msg->message, msg->hwnd, msg->wParam, msg->lParam);
+				   else HookHandle(msg->message, msg->hwnd, msg->wParam, msg->lParam);
+			   }
+		   }
+	   }
+   }
 
 	// Call the next handler in the chain
     return CallNextHookEx (hGetMsgHook, nCode, wParam, lParam);
@@ -852,19 +867,22 @@ LRESULT CALLBACK GetMessageProc(int nCode, WPARAM wParam, LPARAM lParam)
 // Hook procedure for DialogMessageProc hook
 
 LRESULT CALLBACK DialogMessageProc(int nCode, WPARAM wParam, LPARAM lParam)
-{
-	// Do we have to handle this message?
-	if (nCode >= 0)
-	{
-		// Process the hook only if the WinVNC thread ID is valid
-		if ( g_shdata->vnc_thread_id)
-		{
-			MSG *msg = (MSG *) lParam;
+{	
+	if (isAttached)
+   {  
+      // Do we have to handle this message?
+	   if (nCode >= 0)
+	   {
+		   // Process the hook only if the WinVNC thread ID is valid
+		   if ( g_shdata->vnc_thread_id)
+		   {
+			   MSG *msg = (MSG *) lParam;
 
-			// Handle the message
-			HookHandle(msg->message, msg->hwnd, msg->wParam, msg->lParam);
-		}
-	}
+			   // Handle the message
+			   HookHandle(msg->message, msg->hwnd, msg->wParam, msg->lParam);
+		   }
+	   }
+   }
 
 	// Call the next handler in the chain
     return CallNextHookEx (hGetMsgHook, nCode, wParam, lParam);
@@ -875,17 +893,21 @@ LRESULT CALLBACK DialogMessageProc(int nCode, WPARAM wParam, LPARAM lParam)
 #ifdef WH_KEYBOARD_LL
 LRESULT CALLBACK LowLevelKeyboardFilterProc(int nCode, WPARAM wParam, LPARAM lParam)
 {
-	// Are we expected to handle this callback?
-	if (nCode == HC_ACTION)
-	{
-		// Is this keyboard event "real" or "injected"
-		// i.e. hardware or software-produced?
-		KBDLLHOOKSTRUCT *hookStruct = (KBDLLHOOKSTRUCT*)lParam;
-		if (!(hookStruct->flags & LLKHF_INJECTED)) {
-			// Message was not injected - reject it!
-			return TRUE;
-		}
-	}
+   if (isAttached)
+   {
+      // Are we expected to handle this callback?
+	   if (nCode == HC_ACTION)
+	   {
+		   // Is this keyboard event "real" or "injected"
+		   // i.e. hardware or software-produced?
+		   KBDLLHOOKSTRUCT *hookStruct = (KBDLLHOOKSTRUCT*)lParam;
+		   if (!(hookStruct->flags & LLKHF_INJECTED)) {
+			   // Message was not injected - reject it!
+			   return TRUE;
+		   }
+	   }
+   }
+
 
 	// Otherwise, pass on the message
 	return CallNextHookEx(hLLKeyboardHook, nCode, wParam, lParam);
@@ -897,17 +919,20 @@ LRESULT CALLBACK LowLevelKeyboardFilterProc(int nCode, WPARAM wParam, LPARAM lPa
 #ifdef WH_MOUSE_LL
 LRESULT CALLBACK LowLevelMouseFilterProc(int nCode, WPARAM wParam, LPARAM lParam)
 {
-	// Are we expected to handle this callback?
-	if (nCode == HC_ACTION)
-	{
-		// Is this mouse event "real" or "injected"
-		// i.e. hardware or software-produced?
-		MSLLHOOKSTRUCT *hookStruct = (MSLLHOOKSTRUCT*)lParam;
-		if (!(hookStruct->flags & LLMHF_INJECTED)) {
-			// Message was not injected - reject it!
-			return TRUE;
-		}
-	}
+   if (isAttached)
+   {	
+      // Are we expected to handle this callback?
+	   if (nCode == HC_ACTION)
+	   {
+		   // Is this mouse event "real" or "injected"
+		   // i.e. hardware or software-produced?
+		   MSLLHOOKSTRUCT *hookStruct = (MSLLHOOKSTRUCT*)lParam;
+		   if (!(hookStruct->flags & LLMHF_INJECTED)) {
+			   // Message was not injected - reject it!
+			   return TRUE;
+		   }
+	   }
+   }
 
 	// Otherwise, pass on the message
 	return CallNextHookEx(hLLMouseHook, nCode, wParam, lParam);

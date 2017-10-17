@@ -83,7 +83,12 @@ bool PostAddConnectClient_bool_null=false;
 bool PostAddNewRepeaterClient_bool=false;
 
 char pszId_char[20];
+#ifdef IPV6V4
+VCard32 address_vcard4;
+in6_addr address_in6;
+#else
 VCard32 address_vcard;
+#endif
 int port_int;
 
 int start_service(char *cmd);
@@ -108,7 +113,7 @@ void Open_forum();
 HINSTANCE	hInstResDLL;
 BOOL SPECIAL_SC_EXIT=false;
 BOOL SPECIAL_SC_PROMPT=false;
-BOOL G_HTTP;
+//BOOL G_HTTP;
 BOOL multi=false;
 
 void Enable_softwareCAD_elevated();
@@ -127,6 +132,7 @@ void Secure_Plugin(char *szPlugin);
 //HACK to use name in autoreconnect from service with dyn dns
 char dnsname[255];
 VNC_OSVersion VNCOS;
+extern bool PreConnect;
 // winvnc.exe will also be used for helper exe
 // This allow us to minimize the number of seperate exe
 bool
@@ -214,12 +220,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
 	// make vnc last service to stop
 	SetProcessShutdownParameters(0x100,false);
 	// handle dpi on aero
-	/*HMODULE hUser32 = LoadLibrary(_T("user32.dll"));
+	HMODULE hUser32 = LoadLibrary(_T("user32.dll"));
 	typedef BOOL (*SetProcessDPIAwareFunc)();
 	SetProcessDPIAwareFunc setDPIAware=NULL;
 	if (hUser32) setDPIAware = (SetProcessDPIAwareFunc)GetProcAddress(hUser32, "SetProcessDPIAware");
 	if (setDPIAware) setDPIAware();
-	if (hUser32) FreeLibrary(hUser32);*/
+	if (hUser32) FreeLibrary(hUser32);
 
 #ifdef IPP
 	InitIpp();
@@ -229,8 +235,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
 	memset(&info, 0, sizeof(CR_INSTALL_INFO));
 	info.cb = sizeof(CR_INSTALL_INFO);
 	info.pszAppName = _T("UVNC");
-	info.pszAppVersion = _T("1.2.0.9");
-	info.pszEmailSubject = _T("UVNC server 1.2.0.9 Error Report");
+	info.pszAppVersion = _T("1.2.1.1");
+	info.pszEmailSubject = _T("UVNC server 1.2.1.1 Error Report");
 	info.pszEmailTo = _T("uvnc@skynet.be");
 	info.uPriorities[CR_SMAPI] = 1; // Third try send report over Simple MAPI    
 	// Install all available exception handlers
@@ -679,6 +685,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
 				return 0;
 			}
 
+		if (strncmp(&szCmdLine[i], winvncPreConnect, strlen(winvncPreConnect)) == 0)
+		{			
+			i += strlen(winvncPreConnect);
+			PreConnect = true;
+			continue;
+		}
 		if (strncmp(&szCmdLine[i], winvncRunService, strlen(winvncRunService)) == 0)
 		{
 			//Run as service
@@ -732,13 +744,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
 			i+=strlen(winvncmulti);
 			continue;
 		}
-
+		/*
 		if (strncmp(&szCmdLine[i], winvnchttp, strlen(winvnchttp)) == 0)
 		{
 			G_HTTP=true;
 			i+=strlen(winvnchttp);
 			continue;
-		}
+		}*/
 
 		if (strncmp(&szCmdLine[i], winvncStopReconnect, strlen(winvncStopReconnect)) == 0)
 		{
@@ -875,6 +887,63 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
 					}
 					vnclog.Print(LL_STATE, VNCLOG("test... %s %d\n"),name,port);
 					strcpy_s(dnsname,name);
+#ifdef IPV6V4
+					IniFile myIniFile;
+					G_ipv6_allowed=myIniFile.ReadInt("admin", "UseIpv6", false);
+					if (G_ipv6_allowed)
+					{
+						in6_addr address;
+						memset(&address, 0, sizeof(address));
+						if (VSocket::Resolve6(name, &address))
+						{
+							vnclog.Print(LL_INTERR, VNCLOG("PostAddNewClient III \n"));
+							if (!vncService::PostAddNewClientInit6(&address, port))
+							{
+								PostAddNewClient_bool = true;
+								port_int = port;
+								address_in6 = address;
+							}
+						}
+						else
+						{
+							//ask for host,port
+							PostAddNewClient_bool = true;
+							port_int = 0;
+							memset(&address_in6, 0, sizeof(address_in6));
+							Sleep(2000);
+							delete[] name;
+							return 0;
+						}						
+					}
+					//else
+					{
+						VCard32 address = VSocket::Resolve4(name);
+						if (address != 0) {
+							// Post the IP address to the server
+							// We can not contact a runnning service, permissions, so we must store the settings
+							// and process until the vncmenu has been started
+							vnclog.Print(LL_INTERR, VNCLOG("PostAddNewClient III \n"));
+							if (!vncService::PostAddNewClientInit4(address, port))
+							{
+								PostAddNewClient_bool=true;
+								port_int=port;
+								address_vcard4=address;
+							}
+						}
+						else
+						{
+							//ask for host,port
+							PostAddNewClient_bool=true;
+							port_int=0;
+							address_vcard4=0;
+							Sleep(2000);
+							delete[] name;
+							return 0;
+						}
+					}
+
+					delete[] name;
+#else
 					VCard32 address = VSocket::Resolve(name);
 					delete [] name;
 					if (address != 0) {
@@ -899,6 +968,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
 						//Beep(200,1000);
 						return 0;
 					}
+#endif
 				}
 				i=end;
 				continue;
@@ -909,12 +979,22 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
 				// We can not contact a runnning service, permissions, so we must store the settings
 				// and process until the vncmenu has been started
 				vnclog.Print(LL_INTERR, VNCLOG("PostAddNewClient IIII\n"));
+#ifdef IPV6V4
+				if (!vncService::PostAddNewClient4(0, 0))
+				{
+					PostAddNewClient_bool=true;
+					port_int=0;
+					if (G_ipv6_allowed) memset(&address_in6, 0, sizeof(address_in6));
+					else address_vcard4=0;
+				}
+#else
 				if (!vncService::PostAddNewClient(0, 0))
 				{
 				PostAddNewClient_bool=true;
 				port_int=0;
 				address_vcard=0;
 				}
+#endif
 			}
 			continue;
 		}
@@ -951,7 +1031,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
 					{
 						PostAddNewRepeaterClient_bool=true;
 						port_int=0;
+#ifdef IPV6V4
+						address_vcard4=0;
+						memset(&address_in6, 0, sizeof(address_in6));
+#else
 						address_vcard=0;
+#endif
 					}
 				}
 				i=end;
@@ -1093,7 +1178,18 @@ DWORD WINAPI imp_desktop_thread(LPVOID lpParam)
 	{
 		PostAddNewClient_bool=false;
 		vnclog.Print(LL_INTERR, VNCLOG("PostAddNewClient IIIII\n"));
+#ifdef IPV6V4
+		if (G_ipv6_allowed)
+		{
+			vncService::PostAddNewClient6(&address_in6, port_int);
+		}
+		else
+		{
+			vncService::PostAddNewClient4(address_vcard4, port_int);
+		}
+#else
 		vncService::PostAddNewClient(address_vcard, port_int);
+#endif
 	}
 	//adzm 2009-06-20
 	if (PostAddNewRepeaterClient_bool)
@@ -1236,7 +1332,7 @@ int WinVNCAppMain()
 		}
 		vnclog.Print(LL_STATE, VNCLOG("################## Closing Imp Thread\n"));
 	}
-
+	fShutdownOrdered = true;
 	//KillSDTimer();
 	if (instancehan!=NULL)
 		delete instancehan;

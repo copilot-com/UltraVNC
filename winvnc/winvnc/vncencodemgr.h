@@ -159,7 +159,7 @@ public:
 	inline bool IsBulkRectEncoding() {return (m_encoding == rfbEncodingXZ || m_encoding == rfbEncodingXZYW);};
 #endif
 	inline bool IsUltraEncoding() {return (m_encoding == rfbEncodingUltra || m_encoding == rfbEncodingUltra2);};
-
+	inline bool IsEncoderSet() { return ((m_encoder != NULL) && (m_encoding != rfbEncodingRaw)); };
 
 
 protected:
@@ -432,7 +432,8 @@ vncEncodeMgr::SetEncoding(CARD32 encoding,BOOL reinitialize)
 	{
 		//This is not supported, jpeg require 32bit buffers
 		//to avoif a server crash we switch to zrle encoding
-		encoding=rfbEncodingZRLE;
+		//hextile is better as u2 replacement
+		encoding = rfbEncodingHextile;
 	}
 
 	if (reinitialize)
@@ -808,6 +809,7 @@ vncEncodeMgr::EncodeRect(const rfb::Rect &rect,VSocket *outconn)
 	{
 		if (m_use_xor)
 		{
+		omni_mutex_lock l(m_buffer->m_cacheLock, 671);
 		return m_encoder->EncodeRect(m_buffer->m_backbuff, m_buffer->m_cachebuff, outconn ,m_clientbuff, rect);
 		}
 		else return m_encoder->EncodeRect(m_buffer->m_backbuff, NULL, outconn ,m_clientbuff, rect);

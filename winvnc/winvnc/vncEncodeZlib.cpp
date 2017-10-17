@@ -36,7 +36,7 @@
 // However, over slower (64kbps or less) connections, the reduction
 // in data transmitted usually outweighs the extra latency added
 // while the server CPU performs the compression algorithms.
-
+#include "stdhdrs.h"
 #include "vncEncodeZlib.h"
 
 vncEncodeZlib::vncEncodeZlib()
@@ -262,10 +262,10 @@ vncEncodeZlib::EncodeOneRect(BYTE *source,BYTE *source2, BYTE *dest, const RECT 
 			delete [] m_buffer;
 			m_buffer = NULL;
 		}
-		m_buffer = new BYTE [rawDataSize+1];
+		m_buffer = new BYTE [rawDataSize+1000];
 		if (m_buffer == NULL)
 			return vncEncoder::EncodeRect(source, dest, rect);
-		m_bufflen = rawDataSize;
+		m_bufflen = rawDataSize+999;
 		if (m_buffer2 != NULL)
 		{
 			delete [] m_buffer2;

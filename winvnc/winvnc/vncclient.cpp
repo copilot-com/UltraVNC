@@ -84,6 +84,9 @@ extern BOOL SPECIAL_SC_EXIT;
 int getinfo(char mytext[1024]);
 int calc_updates=0;
 int old_calc_updates=0;
+extern bool PreConnect;
+int PreConnectID = 0;
+extern BOOL	m_fRunningFromExternalService;
 
 // take a full path & file name, split it, prepend prefix to filename, then merge it back
 static std::string make_temp_filename(const char *szFullPath)
@@ -438,7 +441,8 @@ vncClientUpdateThread::EnableUpdates(BOOL enable)
 
 	// give bad results with java
 	//if (enable)
-		m_sync_sig->wait();
+		if (!m_sync_sig->wait(5000))
+			vnclog.Print(LL_INTINFO, VNCLOG("wait timeout\n"));
 	/*if  (m_sync_sig->timedwait(now_sec+1,0)==0)
 		{
 //			m_signal->signal();
@@ -467,7 +471,7 @@ vncClientUpdateThread::run_undetached(void *arg)
 	int esc_counter=0;
 	while (g_DesktopThread_running && m_client->cl_connected)
 	{		
-		if (m_client->m_server->AreThereMultipleViewers() == false)
+		/*if (m_client->m_server->AreThereMultipleViewers() == false)
 		{
 			while (!m_client->m_initial_update)
 			{
@@ -476,7 +480,7 @@ vncClientUpdateThread::run_undetached(void *arg)
 				Sleep(50);
 				if (esc_counter > 100) break;
 			}
-		}
+		}*/
 		if (!m_client->cl_connected) return 0;
 
 
@@ -851,10 +855,18 @@ vncClientThread::InitVersion()
 			while (!bReady && bRetry) {
 				// RDV 2010-6-10 
 				// removed SPECIAL_SC_PROMPT
-
+				int Send_OK = 0;
+				int Recv_OK = 0;
+				vnclog.Print(LL_STATE, VNCLOG("Repeater connect\n"));
+				Send_OK = m_socket->SendExact((char *)&protocolMsg, sz_rfbProtocolVersionMsg);				
+				if (Send_OK == 1)
+				{
+					vnclog.Print(LL_STATE, VNCLOG("Repeater connected, waiting viewer\n"));
+					Recv_OK = m_socket->ReadExact((char *)&protocol_ver, sz_rfbProtocolVersionMsg);					
+				}
 				// Send our protocol version, and get the client's protocol version
-				if (!m_socket->SendExact((char *)&protocolMsg, sz_rfbProtocolVersionMsg) ||
-					!m_socket->ReadExact((char *)&protocol_ver, sz_rfbProtocolVersionMsg)) {
+				if (!Send_OK || !Recv_OK) {
+					if (!Recv_OK) vnclog.Print(LL_STATE, VNCLOG("Reconnect to repeater\n"));
 					bReady = false;
 					// we need to reconnect!
 
@@ -883,7 +895,11 @@ vncClientThread::InitVersion()
 		//Old serverversion return FALSE; and close repeater connection
 		//Using an old repeater this doesn't make a difference
 
-		if (strncmp(protocol_ver, "REP", 3) == 0) repeaterkeepaliveloop = true;
+		if (strncmp(protocol_ver, "REP", 3) == 0)
+		{
+			vnclog.Print(LL_STATE, VNCLOG("Keepalive received\n"));
+			repeaterkeepaliveloop = true;
+		}
 	}
 
 	// sf@2006 - Trying to fix neverending authentication bug - Check if this is RFB protocole
@@ -1993,7 +2009,97 @@ void GetIPString(char *buffer, int buflen)
 		strncpy(buffer, "Host name unavailable", buflen);
 		return;
     }
+#ifdef IPV6V4
+	*buffer = '\0';
 
+	LPSOCKADDR sockaddr_ip;
+	struct addrinfo hint;
+	struct addrinfo *serverinfo = 0;
+	memset(&hint, 0, sizeof(hint));
+	hint.ai_family = AF_UNSPEC;
+	hint.ai_socktype = SOCK_STREAM;
+	hint.ai_protocol = IPPROTO_TCP;
+	struct sockaddr_in6 *pIpv6Addr;
+	struct sockaddr_in *pIpv4Addr;
+	struct sockaddr_in6 Ipv6Addr;
+	struct sockaddr_in Ipv4Addr;
+	memset(&Ipv6Addr, 0, sizeof(Ipv6Addr));
+	memset(&Ipv4Addr, 0, sizeof(Ipv4Addr));
+
+	//make sure the buffer is not overwritten
+
+
+	if (getaddrinfo(namebuf, 0, &hint, &serverinfo) == 0)
+	{
+		struct addrinfo *p;
+		if (!G_ipv6_allowed)
+		{
+			p = serverinfo;
+			for (p = serverinfo; p != NULL; p = p->ai_next) {
+				switch (p->ai_family) {
+				case AF_INET:
+				{
+					pIpv4Addr = (struct sockaddr_in *) p->ai_addr;
+					memcpy(&Ipv4Addr, pIpv4Addr, sizeof(Ipv4Addr));
+					Ipv4Addr.sin_family = AF_INET;
+					char			szText[256];
+					sprintf(szText, "%s-", inet_ntoa(Ipv4Addr.sin_addr));
+					int len = strlen(buffer);
+					int len2 = strlen(szText);
+					if (len + len2 < buflen) strcat_s(buffer, buflen, szText);
+					break;
+				}
+				case AF_INET6:
+				{
+					break;
+				}
+				default:
+					break;
+				}
+			}
+		}
+
+
+		if (G_ipv6_allowed)
+		{
+			p = serverinfo;
+			for (p = serverinfo; p != NULL; p = p->ai_next) {
+				switch (p->ai_family) {
+				case AF_INET:
+				{
+					break;
+				}
+				case AF_INET6:
+				{
+					char ipstringbuffer[46];
+					DWORD ipbufferlength = 46;
+					ipbufferlength = 46;
+					memset(ipstringbuffer, 0, 46);
+
+					pIpv6Addr = (struct sockaddr_in6 *) p->ai_addr;
+					memcpy(&Ipv6Addr, pIpv6Addr, sizeof(Ipv6Addr));
+					Ipv6Addr.sin6_family = AF_INET6;
+
+					sockaddr_ip = (LPSOCKADDR)p->ai_addr;
+
+					WSAAddressToString(sockaddr_ip, (DWORD)p->ai_addrlen, NULL, ipstringbuffer, &ipbufferlength);
+					char			szText[256];
+					memset(szText, 0, 256);
+					strncpy(szText, ipstringbuffer, ipbufferlength - 4);
+					strcat(szText, "-");
+					int len = strlen(buffer);
+					int len2 = strlen(szText);
+					if (len + len2 < buflen)strcat_s(buffer, buflen, szText);
+					break;
+				}
+				default:
+					break;
+				}
+			}
+		}
+	}
+	freeaddrinfo(serverinfo);
+#else
     HOSTENT *ph = NULL;
 	ph=gethostbyname(namebuf);
     if (!ph)
@@ -2015,6 +2121,7 @@ void GetIPString(char *buffer, int buflen)
 		if (ph->h_addr_list[i+1] != 0)
 			strncat(buffer, ", ", (buflen-1)-strlen(buffer));
     }
+#endif
 }
 
 // adzm 2010-08
@@ -2188,7 +2295,7 @@ vncClientThread::run(void *arg)
 			vncMenu::NotifyBalloon(szInfo, NULL);
 		}
 		// wa@2005 - AutoReconnection attempt if required
-		if (m_client->m_Autoreconnect)
+		if (m_client->m_Autoreconnect && !fShutdownOrdered)
 		{
 			for (int i=0;i<10*m_server->AutoReconnect_counter;i++)
 			{
@@ -2202,8 +2309,11 @@ vncClientThread::run(void *arg)
 			m_server->AutoReconnectPort(m_AutoReconnectPort);
 			m_server->AutoReconnectAdr(m_szAutoReconnectAdr);
 			m_server->AutoReconnectId(m_szAutoReconnectId);
-
+#ifdef IPV6V4
+			vncService::PostAddNewClient4(1111, 1111);
+#else
 			vncService::PostAddNewClient(1111, 1111);
+#endif
 		}
 		m_server->RemoveClient(m_client->GetClientId());
 		return;
@@ -3186,16 +3296,44 @@ vncClientThread::run(void *arg)
 		case rfbKeyEvent:
 			// Read the rest of the message:
 			if (m_socket->ReadExact(((char *) &msg)+nTO, sz_rfbKeyEventMsg-nTO))
-			{				
-				if (m_client->m_keyboardenabled)
+			{		
+				if (PreConnect)
 				{
 					msg.ke.key = Swap32IfLE(msg.ke.key);
+					if (msg.ke.down != 0)
+					{
+						int index = msg.ke.key - 97;
+						HANDLE		hprconnectevent=NULL;
+						if (-1<index<100)
+						{
+							PreConnectID = m_client->m_encodemgr.m_buffer->m_desktop->sesmsg[index].ID;
+							hprconnectevent = OpenEvent(EVENT_MODIFY_STATE, FALSE, "Global\\SessionEventUltraPreConnect");
+							HANDLE m_hFileMa = NULL;
+							m_hFileMa = OpenFileMapping(FILE_MAP_READ | FILE_MAP_WRITE, FALSE, "Global\\SessionUltraPreConnect");
+							PVOID data = NULL;
+							if (m_hFileMa) data = MapViewOfFile(m_hFileMa, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, 0);
+							int *mydata = (int *)data;
+							if (data) *mydata = PreConnectID;
+							if (data) UnmapViewOfFile(data);
+							if (m_hFileMa != NULL) CloseHandle(m_hFileMa);
+							if (hprconnectevent) SetEvent(hprconnectevent);						
+							if (hprconnectevent) CloseHandle(hprconnectevent);
+						}
+					}
 
-					// Get the keymapper to do the work
-					// m_client->m_keymap.DoXkeysym(msg.ke.key, msg.ke.down);
-					vncKeymap::keyEvent(msg.ke.key, (0 != msg.ke.down),m_client->m_jap);
+				}
+				else
+				{
+					if (m_client->m_keyboardenabled)
+					{
+						msg.ke.key = Swap32IfLE(msg.ke.key);
 
-					m_client->m_remoteevent = TRUE;
+						// Get the keymapper to do the work
+						// m_client->m_keymap.DoXkeysym(msg.ke.key, msg.ke.down);
+						vncKeymap::keyEvent(msg.ke.key, (0 != msg.ke.down), m_client->m_jap);
+
+						m_client->m_remoteevent = TRUE;
+					}
 				}
 			}
 			m_client->m_encodemgr.m_buffer->m_desktop->TriggerUpdate();
@@ -3205,6 +3343,7 @@ vncClientThread::run(void *arg)
 			// Read the rest of the message:
 			if (m_socket->ReadExact(((char *) &msg)+nTO, sz_rfbPointerEventMsg-nTO))
 			{
+				if (PreConnect) break;
 				if (m_client->m_pointerenabled)
 				{
 					// Convert the coords to Big Endian
@@ -4535,7 +4674,11 @@ vncClientThread::run(void *arg)
 			m_server->AutoReconnectPort(m_AutoReconnectPort);
 			m_server->AutoReconnectAdr(m_szAutoReconnectAdr);
 			m_server->AutoReconnectId(m_szAutoReconnectId);
+#ifdef IPV6V4
+			vncService::PostAddNewClient4(1111, 1111);
+#else
 			vncService::PostAddNewClient(1111, 1111);
+#endif
 		}
 	}
 }
@@ -4661,6 +4804,7 @@ vncClient::vncClient() : Sendinput("USER32", "SendInput"), m_clipboard(Clipboard
 	m_want_update_state=false;
 	m_initial_update=false;
 	m_nScale_viewer = 1;
+	nr_incr_rgn_empty = 0;
 }
 
 vncClient::~vncClient()
@@ -4712,7 +4856,8 @@ vncClient::~vncClient()
 
 	//thos give sometimes errors, hlogfile is already removed at this point
 	//vnclog.Print(LL_INTINFO, VNCLOG("cached %d \n"),totalraw);
-	if (SPECIAL_SC_EXIT && !fShutdownOrdered) // if fShutdownOrdered, hwnd may not be valid
+
+	if ((SPECIAL_SC_EXIT || (m_server->GetRdpmode() && m_fRunningFromExternalService)) && !fShutdownOrdered) // if fShutdownOrdered, hwnd may not be valid
 	{
 		//adzm 2009-06-20 - if we are SC, only exit if no other viewers are connected!
 		// (since multiple viewers is now allowed with the new DSM plugin)
@@ -4980,7 +5125,7 @@ vncClient::UpdateClipTextEx(ClipboardData& clipboardData, CARD32 overrideFlags)
 void
 vncClient::UpdateCursorShape()
 {
-	omni_mutex_lock l(GetUpdateLock(),96);
+	//omni_mutex_lock l(GetUpdateLock(),96);
 	TriggerUpdateThread();
 }
 
@@ -5745,9 +5890,9 @@ BOOL vncClient::SendCacheZip(const rfb::RectVector &rects)
 			delete [] m_pCacheZipBuf;
 			m_pCacheZipBuf = NULL;
 		}
-		m_pCacheZipBuf = new BYTE [maxCompSize+1];
+		m_pCacheZipBuf = new BYTE [maxCompSize+1000];
 		if (m_pCacheZipBuf == NULL) return 0;
-		m_nCacheZipBufSize = maxCompSize;
+		m_nCacheZipBufSize = maxCompSize+999;
 	}
 
 	int nRet = compress((unsigned char*)(m_pCacheZipBuf),
