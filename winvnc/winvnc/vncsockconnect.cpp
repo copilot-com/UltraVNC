@@ -92,7 +92,7 @@ void *vncSockConnectThread::run_undetached(void * arg)
 			}
 
 			vnclog.Print(LL_CLIENTS, VNCLOG("accepted connection from %s\n"), new_socket->GetPeerName());
-			if (!m_shutdown && !fShutdownOrdered) m_server->AddClient(new_socket, FALSE, FALSE,NULL);
+			if (!m_shutdown && !fShutdownOrdered) m_server->AddClient(new_socket, FALSE, FALSE,NULL,false);
 		}
 
 		if (m_shutdown) 
@@ -130,9 +130,13 @@ vncSockConnect::~vncSockConnect()
 	((vncSockConnectThread *)m_thread)->m_shutdown = TRUE;
 
 	VSocket socket;
+#ifdef IPV6V4
+	socket.CreateBindConnect("localhost", m_port);
+#else
 	socket.Create();
 	socket.Bind(0);
 	socket.Connect("localhost", m_port);
+#endif
 	socket.Close();
 
 	void *returnval;
@@ -148,6 +152,10 @@ BOOL vncSockConnect::Init(vncServer *server, UINT port)
 	// Save the port id
 	m_port = port;
 
+#ifdef IPV6V4
+	if (!m_socket.CreateBindListen(m_port, server->LoopbackOnly()))
+		return FALSE;
+#else
 	// Create the listening socket
 	if (!m_socket.Create())
 		return FALSE;
@@ -159,7 +167,7 @@ BOOL vncSockConnect::Init(vncServer *server, UINT port)
 	// Set it to listen
 	if (!m_socket.Listen())
 		return FALSE;
-
+#endif
 	// Create the new thread
 	m_thread = new vncSockConnectThread;
 	if (m_thread == NULL)

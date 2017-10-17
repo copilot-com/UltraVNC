@@ -441,25 +441,14 @@ vncServer::ShutdownServer()
 }
 
 // Client handling functions
-vncClientId vncServer::AddClient(VSocket *socket, BOOL auth, BOOL shared)
+vncClientId vncServer::AddClient(VSocket *socket, BOOL auth, BOOL shared, BOOL outgoing)
 {
-	return AddClient(socket, auth, shared, /*FALSE,*/ 0, /*TRUE, TRUE,*/NULL); 
+	return AddClient(socket, auth, shared, 0, NULL, outgoing);
 }
 
-vncClientId vncServer::AddClient(VSocket *socket, BOOL auth, BOOL shared, rfbProtocolVersionMsg *protocolMsg)
+vncClientId vncServer::AddClient(VSocket *socket, BOOL auth, BOOL shared, rfbProtocolVersionMsg *protocolMsg, BOOL outgoing)
 {
-	return AddClient(socket, auth, shared, /*FALSE,*/ 0, /*TRUE, TRUE,*/protocolMsg); 
-}
-
-// adzm 2009-07-05 - repeater IDs
-vncClientId vncServer::AddClient(VSocket *socket,
-					 BOOL auth,
-					 BOOL shared,
-					 int capability,
-					 /*BOOL keysenabled, BOOL ptrenabled,*/
-					 rfbProtocolVersionMsg *protocolMsg)
-{
-	return AddClient(socket, auth, shared, /*FALSE,*/ 0, /*TRUE, TRUE,*/protocolMsg, NULL, NULL, 0);
+	return AddClient(socket, auth, shared,  0, protocolMsg, outgoing);
 }
 
 // adzm 2009-07-05 - repeater IDs
@@ -467,11 +456,20 @@ vncClientId vncServer::AddClient(VSocket *socket,
 					 BOOL auth,
 					 BOOL shared,
 					 int capability,
-					 /*BOOL keysenabled, BOOL ptrenabled,*/
+					 rfbProtocolVersionMsg *protocolMsg, BOOL outgoing)
+{
+	return AddClient(socket, auth, shared,  0, protocolMsg, NULL, NULL, 0, outgoing);
+}
+
+// adzm 2009-07-05 - repeater IDs
+vncClientId vncServer::AddClient(VSocket *socket,
+					 BOOL auth,
+					 BOOL shared,
+					 int capability,
 					 rfbProtocolVersionMsg *protocolMsg,
 					 VString szRepeaterID,
 					 VString szHost,
-					 VCard port)
+					 VCard port, BOOL outgoing)
 {
 	vnclog.Print(LL_STATE, VNCLOG("AddClient() started\n"));
 	
@@ -501,6 +499,7 @@ vncClientId vncServer::AddClient(VSocket *socket,
 	}
 
 	// Set the client's settings
+	client->SetOutgoing(outgoing);
 	client->SetProtocolVersion(protocolMsg);
 	client->SetCapability(capability);
 	client->EnableKeyboard(/*keysenabled &&*/ m_enable_remote_inputs);
@@ -1571,9 +1570,13 @@ vncServer::SockConnect(BOOL On)
 
 					// Attempt to connect to the port
 					VSocket tempsock;
+#ifdef IPV6V4
+					if (!tempsock.CreateConnect("localhost", m_port))
+#else
 					if (tempsock.Create())
 					{
 						if (!tempsock.Connect("localhost", m_port))
+#endif
 						{
 							// Couldn't connect, so this port is probably usable!
 							if (m_socketConn->Init(this, m_port))
@@ -1582,7 +1585,11 @@ vncServer::SockConnect(BOOL On)
 								break;
 							}
 						}
+#ifdef IPV6V4
+#else
 					}
+#endif
+
 				}
 
 				if (!ok)
@@ -2547,20 +2554,25 @@ void vncServer::_actualTimerRetryHandler()
 				else*/
 				{
 					// Connect out to the specified host on the VNCviewer listen port
+#ifdef IPV6V4
+					if (tmpsock->CreateConnect(m_szAutoReconnectAdr, m_AutoReconnectPort))
+#else
 					tmpsock->Create();
-					if (tmpsock->Connect(m_szAutoReconnectAdr, m_AutoReconnectPort)) {
+					if (tmpsock->Connect(m_szAutoReconnectAdr, m_AutoReconnectPort))
+#endif
+					{
 						if ( strlen( m_szAutoReconnectId ) > 0 )
 						{
 							tmpsock->Send(m_szAutoReconnectId,250);
 							tmpsock->SetTimeout(0);
 							// adzm 2009-07-05 - repeater IDs
 							// Add the new client to this server
-							AddClient(tmpsock, TRUE, TRUE, 0, NULL, m_szAutoReconnectId, m_szAutoReconnectAdr, m_AutoReconnectPort);
+							AddClient(tmpsock, TRUE, TRUE, 0, NULL, m_szAutoReconnectId, m_szAutoReconnectAdr, m_AutoReconnectPort,true);
 							m_retry_timeout = 0;
 						} else {
 							// Add the new client to this server
 							// adzm 2009-08-02
-							AddClient(tmpsock, TRUE, TRUE, 0, NULL, NULL, m_szAutoReconnectAdr, m_AutoReconnectPort);
+							AddClient(tmpsock, TRUE, TRUE, 0, NULL, NULL, m_szAutoReconnectAdr, m_AutoReconnectPort,true);
 							m_retry_timeout = 0;
 						}
 					} else {

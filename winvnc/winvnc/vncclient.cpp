@@ -2219,8 +2219,13 @@ bool vncClientThread::TryReconnect()
 	// Connect out to the specified host on the VNCviewer listen port
 	// To be really good, we should allow a display number here but
 	// for now we'll just assume we're connecting to display zero
+#ifdef IPV6V4
+	if (m_socket->CreateConnect(m_client->GetHost(), m_client->GetHostPort()))
+#else
 	m_socket->Create();
-	if (m_socket->Connect(m_client->GetHost(), m_client->GetHostPort()))	{
+	if (m_socket->Connect(m_client->GetHost(), m_client->GetHostPort()))	
+#endif
+	{
 		if (m_client->GetRepeaterID()) {
 			char finalidcode[_MAX_PATH];
 			//adzm 2010-08 - this was sending uninitialized data over the wire
@@ -2292,7 +2297,7 @@ vncClientThread::run(void *arg)
 
 			szInfo[255] = '\0';
 
-			vncMenu::NotifyBalloon(szInfo, NULL);
+			if (m_client->m_outgoing) vncMenu::NotifyBalloon(szInfo, NULL);
 		}
 		// wa@2005 - AutoReconnection attempt if required
 		if (m_client->m_Autoreconnect && !fShutdownOrdered)
@@ -2495,7 +2500,7 @@ vncClientThread::run(void *arg)
         {
             // send first keepalive to let the client know we accepted the encoding request
             m_client->SendServerStateUpdate(rfbKeepAliveInterval, m_server->GetKeepAliveInterval());
-            m_client->SendKeepAlive();
+            m_client->SendKeepAlive(true);
             need_first_keepalive = false;
         }
 
@@ -2580,14 +2585,6 @@ vncClientThread::run(void *arg)
 
                     }
 #endif
-            if (sz_rfbKeepAliveMsg > 1)
-            {
-			    if (!m_socket->ReadExact(((char *) &msg)+nTO, sz_rfbKeepAliveMsg-nTO))
-			    {
-					m_client->cl_connected = FALSE;
-				    break;
-			    }
-            }
             break;
 
 		case rfbSetPixelFormat:
@@ -5041,6 +5038,8 @@ vncClient::TriggerUpdateThread()
 	
 	if (!m_updatethread)
 	{
+		if (m_server->AreThereMultipleViewers()) 
+			cl_connected = TRUE;
 		m_updatethread = new vncClientUpdateThread;
 		if (!m_updatethread || 
 			!m_updatethread->Init(this)) {

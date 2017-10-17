@@ -210,6 +210,55 @@ extern char sz_F5[128];
 extern char sz_F6[64];
 extern bool command_line;
 
+#ifdef IPV6V4
+int inet_pton2(int af, const char *src, void *dst)
+{
+	struct sockaddr_storage ss;
+	int size = sizeof(ss);
+	char src_copy[INET6_ADDRSTRLEN + 1];
+
+	ZeroMemory(&ss, sizeof(ss));
+	/* stupid non-const API */
+	strncpy(src_copy, src, INET6_ADDRSTRLEN + 1);
+	src_copy[INET6_ADDRSTRLEN] = 0;
+
+	if (WSAStringToAddress(src_copy, af, NULL, (struct sockaddr *)&ss, &size) == 0) {
+		switch (af) {
+		case AF_INET:
+			*(struct in_addr *)dst = ((struct sockaddr_in *)&ss)->sin_addr;
+			return 1;
+		case AF_INET6:
+			*(struct in6_addr *)dst = ((struct sockaddr_in6 *)&ss)->sin6_addr;
+			return 1;
+		}
+	}
+	return 0;
+}
+
+const char *inet_ntop2(int af, const void *src, char *dst, socklen_t size)
+{
+	struct sockaddr_storage ss;
+	unsigned long s = size;
+
+	ZeroMemory(&ss, sizeof(ss));
+	ss.ss_family = af;
+
+	switch (af) {
+	case AF_INET:
+		((struct sockaddr_in *)&ss)->sin_addr = *(struct in_addr *)src;
+		break;
+	case AF_INET6:
+		((struct sockaddr_in6 *)&ss)->sin6_addr = *(struct in6_addr *)src;
+		break;
+	default:
+		return NULL;
+	}
+	/* cannot direclty use &size because of strict aliasing rules */
+	return (WSAAddressToString((struct sockaddr *)&ss, sizeof(ss), NULL, dst, &s) == 0) ?
+	dst : NULL;
+}
+#endif
+
 // *************************************************************************
 //  A Client connection involves two threads - the main one which sets up
 //  connections and processes window messages and inputs, and a
@@ -1705,8 +1754,9 @@ void ClientConnection::HandleQuickOption()
 	{
 	case 1:
 		m_opts.m_PreferredEncodings.clear();
-		if (new_ultra_server) m_opts.m_PreferredEncodings.push_back(rfbEncodingUltra2);
-		else m_opts.m_PreferredEncodings.push_back(rfbEncodingHextile);
+		//if (new_ultra_server) m_opts.m_PreferredEncodings.push_back(rfbEncodingUltra2);
+		//else 
+		m_opts.m_PreferredEncodings.push_back(rfbEncodingHextile);
 		m_opts.m_Use8Bit = rfbPFFullColors; //false;
 		m_opts.m_fEnableCache = false;
 		m_opts.autoDetect = true;
@@ -1883,14 +1933,14 @@ void ClientConnection::Connect()
 		if (info->ai_family == AF_INET6)
 		{
 			IsIpv6 = true;
-			inet_pton(AF_INET6, m_host, &(Ipv6Addr.sin6_addr));
+			inet_pton2(AF_INET6, m_host, &(Ipv6Addr.sin6_addr));
 			Ipv6Addr.sin6_family = AF_INET6;
 			Ipv6Addr.sin6_port = htons(m_port);
 		}
 		if (info->ai_family == AF_INET)
 		{
 			IsIpv4 = true;
-			inet_pton(AF_INET, m_host, &(Ipv4Addr.sin_addr));
+			inet_pton2(AF_INET, m_host, &(Ipv4Addr.sin_addr));
 			Ipv4Addr.sin_family = AF_INET;
 			Ipv4Addr.sin_port = htons(m_port);
 		}
@@ -2174,14 +2224,14 @@ void ClientConnection::ConnectProxy()
 		if (info->ai_family == AF_INET6)
 		{
 			IsIpv6 = true;
-			inet_pton(AF_INET6, m_proxyhost, &(Ipv6Addr.sin6_addr));
+			inet_pton2(AF_INET6, m_proxyhost, &(Ipv6Addr.sin6_addr));
 			Ipv6Addr.sin6_family = AF_INET6;
 			Ipv6Addr.sin6_port = htons(m_proxyport);
 		}
 		if (info->ai_family == AF_INET)
 		{
 			IsIpv4 = true;
-			inet_pton(AF_INET, m_proxyhost, &(Ipv4Addr.sin_addr));
+			inet_pton2(AF_INET, m_proxyhost, &(Ipv4Addr.sin_addr));
 			Ipv4Addr.sin_family = AF_INET;
 			Ipv4Addr.sin_port = htons(m_proxyport);
 		}
@@ -3786,7 +3836,7 @@ void ClientConnection::SizeWindow()
 	if (m_opts.m_w != 0 || m_opts.m_h != 0 || m_opts.m_x != 0 || m_opts.m_y!=0)
 	{
 		// x y w h
-		if (m_opts.m_w != 0 && m_opts.m_h != 0 && m_opts.m_x != 0 && m_opts.m_y != 0)
+		if (m_opts.m_w != 0 && m_opts.m_h != 0)
 		{
 			pos_set = true; size_set = true;
 			SetWindowPos(m_hwndMain, HWND_TOP, m_opts.m_x, m_opts.m_y, m_opts.m_w, m_opts.m_h, SWP_SHOWWINDOW);
@@ -5943,11 +5993,13 @@ inline void ClientConnection::ReadScreenUpdate()
 				break;
 			}
 			m_opts.m_PreferredEncodings.clear();
-			if (new_ultra_server) m_opts.m_PreferredEncodings.push_back(rfbEncodingUltra2);
-			else m_opts.m_PreferredEncodings.push_back(rfbEncodingHextile);
+			//if (new_ultra_server) m_opts.m_PreferredEncodings.push_back(rfbEncodingUltra2);
+			//else 
+			m_opts.m_PreferredEncodings.push_back(rfbEncodingHextile);
 			//m_opts.m_Use8Bit = rfbPFFullColors;			
-			if (new_ultra_server && encoding == rfbEncodingUltra2 && m_opts.m_fEnableCache == false){}
-			else if (encoding == rfbEncodingHextile && m_opts.m_fEnableCache == false){}
+			//if (new_ultra_server && encoding == rfbEncodingUltra2 && m_opts.m_fEnableCache == false){}
+			//else 
+			if (encoding == rfbEncodingHextile && m_opts.m_fEnableCache == false){}
 			else m_pendingFormatChange = true;
 
 			m_opts.m_fEnableCache = false;
@@ -5957,8 +6009,9 @@ inline void ClientConnection::ReadScreenUpdate()
 		{
 			m_nConfig = 1;		
 			m_opts.m_PreferredEncodings.clear();
-			if (new_ultra_server) m_opts.m_PreferredEncodings.push_back(rfbEncodingUltra2);
-			else m_opts.m_PreferredEncodings.push_back(rfbEncodingZRLE); //rfbEncodingZlibHex;
+			//if (new_ultra_server) m_opts.m_PreferredEncodings.push_back(rfbEncodingUltra2);
+			//else 
+			m_opts.m_PreferredEncodings.push_back(rfbEncodingZRLE); //rfbEncodingZlibHex;
 			//m_opts.m_Use8Bit = rfbPFFullColors; // Max colors
 			m_opts.m_fEnableCache = false;
 			m_pendingFormatChange = true;
@@ -7193,14 +7246,14 @@ void ClientConnection::GTGBS_CreateDisplay()
 			  m_pApp->m_instance,
 			  (LPVOID)this);
 	helper::SafeSetWindowUserData(m_hwndMain, (LONG_PTR)this);
-	ImmAssociateContext(m_hwndMain, NULL);    
+	ImmAssociateContext(m_hwndMain, NULL);	
 }
 
 //
 //
 //
 LRESULT CALLBACK ClientConnection::GTGBS_ShowStatusWindow(LPVOID lpParameter)
-{
+{	
 	ClientConnection *_this = (ClientConnection*)lpParameter;
 
 	 _this->m_fStatusOpen = true;
@@ -8109,9 +8162,11 @@ LRESULT CALLBACK ClientConnection::WndProc(HWND hwnd, UINT iMsg, WPARAM wParam, 
 						MRU *m_pMRU;
 						m_pMRU = new MRU(SESSION_MRU_KEY_NAME, 26);
 						RECT rect;
-						GetWindowRect(hwnd, &rect);
-						if (_this->m_opts.m_SavePos && !_this->m_opts.m_SaveSize) m_pMRU->SetPos(_this->m_host, rect.left, rect.top, 0, 0);
-						if (_this->m_opts.m_SavePos && _this->m_opts.m_SaveSize) m_pMRU->SetPos(_this->m_host, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top);
+						if (GetWindowRect(hwnd, &rect) != 0 && !IsIconic(hwnd))
+							{
+								if (_this->m_opts.m_SavePos && !_this->m_opts.m_SaveSize) m_pMRU->SetPos(_this->m_host, rect.left, rect.top, 0, 0);
+								if (_this->m_opts.m_SavePos && _this->m_opts.m_SaveSize) m_pMRU->SetPos(_this->m_host, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top);
+							}
 						if (m_pMRU) delete m_pMRU;
 					}
 						_this->m_keepalive_timer=0;
@@ -8951,29 +9006,31 @@ LRESULT CALLBACK ClientConnection::WndProchwnd(HWND hwnd, UINT iMsg, WPARAM wPar
 			case WM_RBUTTONDOWN:
 			case WM_RBUTTONUP:
 			case WM_MOUSEMOVE:
-				{
-					if (_this->m_opts.m_IdleInterval > 0) { KillTimer(_this->m_hwndcn, 1013);SetTimer(hwnd, _this->m_idle_timer, _this->m_idle_time, NULL); _this->SetDormant(false); }
-					if (_this->m_SWselect) {return 0;}
-					if (!_this->m_running) return 0;
-//					if (GetFocus() != hwnd) return 0;
-//					if (GetFocus() != _this->m_hwnd) return 0;
-					if (GetFocus() != _this->m_hwndMain) return 0;
-					int x = LOWORD(lParam);
-					int y = HIWORD(lParam);
-					wParam = MAKEWPARAM(LOWORD(wParam), 0);
-					if (_this->InFullScreenMode()) {
-						if (_this->BumpScroll(x,y))
-							return 0;
-					}
-					if ( _this->m_opts.m_ViewOnly) return 0;
+			{
+				if (_this->m_opts.m_IdleInterval > 0) { KillTimer(_this->m_hwndcn, 1013); SetTimer(hwnd, _this->m_idle_timer, _this->m_idle_time, NULL); _this->SetDormant(false); }
+				if (_this->m_SWselect) { return 0; }
+				if (!_this->m_running) return 0;
+				//					if (GetFocus() != hwnd) return 0;
+				//					if (GetFocus() != _this->m_hwnd) return 0;
+				if (GetFocus() != _this->m_hwndMain) return 0;
+				int x = LOWORD(lParam);
+				int y = HIWORD(lParam);
+				wParam = MAKEWPARAM(LOWORD(wParam), 0);
+				if (_this->InFullScreenMode()) {
+					if (_this->BumpScroll(x, y))
+						return 0;
+				}
+				if (_this->m_opts.m_ViewOnly) return 0;
 #ifdef _Gii
-					//Filter touch/pen events
+				//Filter touch/pen events
+				if(_this->mytouch->TouchActivated()==true) {
 					if(IsPenEvent(GetMessageExtraInfo()) || IsTouchEvent(GetMessageExtraInfo()))
 					{
 						//ignore mouse events.
 						return 0;
 					}
-					if (mouse_enable != true) return 0;
+				}
+				if (mouse_enable != true) return 0;
 #endif
 					//adzm 2010-09
 					if (_this->ProcessPointerEvent(x,y, wParam, iMsg)) {
