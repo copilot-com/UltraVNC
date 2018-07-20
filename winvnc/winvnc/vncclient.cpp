@@ -692,7 +692,7 @@ vncClientUpdateThread::run_undetached(void *arg)
 			if (bShouldFlush) 
 				m_client->m_socket->ClearQueue();
 			}
-
+			
 			// SEND AN UPDATE
 			// We do this without holding locks, to avoid network problems
 			// stalling the server.
@@ -714,9 +714,10 @@ vncClientUpdateThread::run_undetached(void *arg)
 			}
 			else
 				clipregion.clear();
-
-		}//end omni_mutex_lock l(m_client->GetUpdateLock(),82);
+			}//end omni_mutex_lock l(m_client->GetUpdateLock(),82);
 		yield();
+
+		
 	}
 
 	vnclog.Print(LL_INTINFO, VNCLOG("stopping update thread\n"));	
@@ -795,16 +796,16 @@ vncClientThread::InitVersion()
 				// removed SPECIAL_SC_PROMPT
 				int Send_OK = 0;
 				int Recv_OK = 0;
-				vnclog.Print(LL_STATE, VNCLOG("Repeater connect\n"));
+				vnclog.Print(LL_STATE, VNCLOG("Send protocolMsg\n"));
 				Send_OK = m_socket->SendExact((char *)&protocolMsg, sz_rfbProtocolVersionMsg);				
 				if (Send_OK == 1)
 				{
-					vnclog.Print(LL_STATE, VNCLOG("Repeater connected, waiting viewer\n"));
+					vnclog.Print(LL_STATE, VNCLOG("Send_OK\n"));
 					Recv_OK = m_socket->ReadExact((char *)&protocol_ver, sz_rfbProtocolVersionMsg);					
 				}
 				// Send our protocol version, and get the client's protocol version
 				if (!Send_OK || !Recv_OK) {
-					if (!Recv_OK) vnclog.Print(LL_STATE, VNCLOG("Reconnect to repeater\n"));
+					if (!Recv_OK) vnclog.Print(LL_STATE, VNCLOG("!Send_OK || !Recv_OK\n"));
 					bReady = false;
 					// we need to reconnect!
 
@@ -2340,8 +2341,6 @@ vncClientThread::run(void *arg)
 	// Modif sf@2002 - Scaling
 	server_ini.framebufferWidth = Swap16IfLE(m_client->m_ScaledScreen.br.x - m_client->m_ScaledScreen.tl.x);
 	server_ini.framebufferHeight = Swap16IfLE(m_client->m_ScaledScreen.br.y - m_client->m_ScaledScreen.tl.y);
-	// server_ini.framebufferWidth = Swap16IfLE(m_client->m_fullscreen.br.x-m_client->m_fullscreen.tl.x);
-	// server_ini.framebufferHeight = Swap16IfLE(m_client->m_fullscreen.br.y-m_client->m_fullscreen.tl.y);
 
 	server_ini.format.redMax = Swap16IfLE(server_ini.format.redMax);
 	server_ini.format.greenMax = Swap16IfLE(server_ini.format.greenMax);
@@ -2390,6 +2389,7 @@ vncClientThread::run(void *arg)
 	BOOL need_to_disable_input = m_server->LocalInputsDisabled();
     bool need_to_clear_keyboard = true;
     bool need_first_keepalive = false;
+	bool need_keepalive = false;
 	bool need_first_idletime = false;
 	bool firstrun=true;
     bool need_ft_version_msg =  false;
@@ -2441,10 +2441,14 @@ vncClientThread::run(void *arg)
             m_client->SendKeepAlive(true);
             need_first_keepalive = false;
         }
+		if (need_keepalive) {
+			m_client->SendKeepAlive(true);
+			need_keepalive = false;
+		}
 
 		if (need_first_idletime)
 		{
-			// send first keepalive to let the client know we accepted the encoding request
+			// send idletime to let the client know we accepted the encoding request
 			m_client->SendServerStateUpdate(rfbIdleInputTimeout, m_server->GetIdleInputTimeout());
 			need_first_idletime = false;
 		}
@@ -2509,21 +2513,7 @@ vncClientThread::run(void *arg)
 		{
 
         case rfbKeepAlive:
-            // nothing else to read.
-            // NO-OP
-#if defined(_DEBUG)
-                    {
-                        static time_t lastrecv = 0;
-                        time_t now = time(&now);
-                        time_t delta = now - lastrecv;
-                        lastrecv = now;
-                        char msgg[255];
-                        sprintf(msgg, "keepalive received %u seconds since last one\n", delta);
-                        OutputDebugString(msgg);
-
-                    }
-#endif
-					m_client->SendKeepAlive(true);
+				need_keepalive = true;
             break;
 
 		case rfbSetPixelFormat:
@@ -3226,7 +3216,8 @@ vncClientThread::run(void *arg)
 				break;
 			}
 
-			if (!m_client->NotifyUpdate(msg.fur)) m_client->cl_connected = FALSE;
+			if (!m_client->NotifyUpdate(msg.fur)) 
+				m_client->cl_connected = FALSE;
 			break;
 
 		case rfbKeyEvent:
@@ -3288,8 +3279,8 @@ vncClientThread::run(void *arg)
 					msg.pe.y = (Swap16IfLE(msg.pe.y));
 					//Error, msd.pe.x is defined as unsigned while with a negative secondary screen it's negative
 					//offset need to be used later in this function
-					msg.pe.x = (msg.pe.x)* m_client->m_nScale;// + (m_client->m_SWOffsetx+m_client->m_ScreenOffsetx);
-					msg.pe.y = (msg.pe.y)* m_client->m_nScale;// + (m_client->m_SWOffsety+m_client->m_ScreenOffsety);
+					msg.pe.x = (msg.pe.x)* m_client->m_nScale;
+					msg.pe.y = (msg.pe.y)* m_client->m_nScale;
 
 					// Work out the flags for this event
 					DWORD flags = MOUSEEVENTF_ABSOLUTE;
@@ -3364,8 +3355,8 @@ vncClientThread::run(void *arg)
 					//primary display always have (0,0) as corner
 					if (m_client->m_display_type==1)
 						{
-							unsigned long x = ((msg.pe.x + (m_client->m_SWOffsetx)) *  65535) / (screenX-1);
-							unsigned long y = ((msg.pe.y + (m_client->m_SWOffsety))* 65535) / (screenY-1);
+							unsigned long x = ((msg.pe.x + (m_client->monitor_Offsetx)) *  65535) / (screenX-1);
+							unsigned long y = ((msg.pe.y + (m_client->monitor_Offsety))* 65535) / (screenY-1);
 							// Do the pointer event
 							::mouse_event(flags, (DWORD) x, (DWORD) y, wheel_movement, 0);
 //							vnclog.Print(LL_INTINFO, VNCLOG("########mouse_event :%i %i \n"),x,y);
@@ -3376,8 +3367,8 @@ vncClientThread::run(void *arg)
 							{							
 								INPUT evt;
 								evt.type = INPUT_MOUSE;
-								int xx=msg.pe.x-GetSystemMetrics(SM_XVIRTUALSCREEN)+ (m_client->m_SWOffsetx+m_client->m_ScreenOffsetx);
-								int yy=msg.pe.y-GetSystemMetrics(SM_YVIRTUALSCREEN)+ (m_client->m_SWOffsety+m_client->m_ScreenOffsety);
+								int xx=msg.pe.x-GetSystemMetrics(SM_XVIRTUALSCREEN)+ (m_client->monitor_Offsetx+m_client->m_ScreenOffsetx);
+								int yy=msg.pe.y-GetSystemMetrics(SM_YVIRTUALSCREEN)+ (m_client->monitor_Offsety+m_client->m_ScreenOffsety);
 								evt.mi.dx = (xx * 65535) / (GetSystemMetrics(SM_CXVIRTUALSCREEN)-1);
 								evt.mi.dy = (yy* 65535) / (GetSystemMetrics(SM_CYVIRTUALSCREEN)-1);
 								evt.mi.dwFlags = flags | MOUSEEVENTF_VIRTUALDESK;
@@ -3629,8 +3620,8 @@ vncClientThread::run(void *arg)
 				break;
 			}
 			m_client->m_encodemgr.m_buffer->m_desktop->SetSW(
-				(Swap16IfLE(msg.sw.x) + m_client->m_SWOffsetx+m_client->m_ScreenOffsetx) * m_client->m_nScale,
-				(Swap16IfLE(msg.sw.y) + m_client->m_SWOffsety+m_client->m_ScreenOffsety) * m_client->m_nScale);
+				(Swap16IfLE(msg.sw.x) + m_client->monitor_Offsetx+m_client->m_ScreenOffsetx) * m_client->m_nScale,
+				(Swap16IfLE(msg.sw.y) + m_client->monitor_Offsety+m_client->m_ScreenOffsety) * m_client->m_nScale);
 			break;
 
 
@@ -3854,152 +3845,7 @@ vncClientThread::run(void *arg)
 
 					// The client requests a File
 					case rfbFileTransferRequest:
-					{
-						m_client->filetransferrequestPart1(msg, fUserOk);
-
-						/*omni_mutex_lock ll(m_client->GetUpdateLock(), 90);
-						m_client->m_fCompressionEnabled = (Swap32IfLE(msg.ft.size) == 1);
-						const UINT length = Swap32IfLE(msg.ft.length);
-						memset(m_client->m_szSrcFileName, 0, sizeof(m_client->m_szSrcFileName));
-						if (length > sizeof(m_client->m_szSrcFileName)) break;
-						// Read in the Name of the file to create
-						if (!m_socket->ReadExact(m_client->m_szSrcFileName, length))
-						{
-							//MessageBoxSecure(NULL, "4. Abort !", "Ultra WinVNC", MB_OK);
-							//vnclog.Print(LL_INTINFO, VNCLOG("*** FileTransfer: Cannot read requested filename. Abort !\n"));
-							break;
-						}
-
-						// moved jdp 8/5/08 -- have to read whole packet to keep protocol in sync
-						if (!m_server->FileTransferEnabled() || !fUserOk) break;
-						// sf@2003 - Directory Transfer trick
-						// If the file is an Ultra Directory Zip Request we zip the directory here
-						// and we give it the requested name for transfer
-
-						int nDirZipRet = m_client->ZipPossibleDirectory(m_client->m_szSrcFileName);
-						if (nDirZipRet == -1)
-						{
-							//MessageBoxSecure(NULL, "5. Abort !", "Ultra WinVNC", MB_OK);
-							//vnclog.Print(LL_INTINFO, VNCLOG("*** FileTransfer: Failed to zip requested dir. Abort !\n"));
-
-							//	[v1.0.2-jp1 fix] Empty directory receive problem
-							rfbFileTransferMsg ft;
-							ft.type = rfbFileTransfer;
-							ft.contentType = rfbFileHeader;
-							ft.size = Swap32IfLE(0xffffffffu); // File Size in bytes, 0xFFFFFFFF (-1) means error
-							ft.length = Swap32IfLE(strlen(m_client->m_szSrcFileName));
-							//adzm 2010-09 - minimize packets. SendExact flushes the queue.
-							m_socket->SendExactQueue((char *)&ft, sz_rfbFileTransferMsg, rfbFileTransfer);
-							m_socket->SendExactQueue((char *)m_client->m_szSrcFileName, strlen(m_client->m_szSrcFileName));
-							// 2 May 2008 jdp send the highpart too, else the client will hang
-							// sf@2004 - Improving huge file size handling
-							// TODO: what if we're speaking the old protocol, how can we tell? 
-							CARD32 sizeH = Swap32IfLE(0xffffffffu);
-							m_socket->SendExact((char *)&sizeH, sizeof(CARD32));
-
-							m_client->m_fFileUploadError = true;
-							m_client->m_fFileUploadRunning = false;
-							m_client->FTUploadFailureHook();
-
-							break;
-						}					
-						// Open source file
-						m_client->m_hSrcFile = CreateFile(
-															m_client->m_szSrcFileName,		
-															GENERIC_READ,		
-															FILE_SHARE_READ | FILE_SHARE_WRITE,
-															NULL,				
-															OPEN_EXISTING,		
-															FILE_FLAG_SEQUENTIAL_SCAN,	
-															NULL
-														);				
-						
-						// DWORD dwSrcSize = (DWORD)0;
-						ULARGE_INTEGER n2SrcSize;
-						if (m_client->m_hSrcFile == INVALID_HANDLE_VALUE)
-						{
-							DWORD TheError = GetLastError();
-							// dwSrcSize = 0xFFFFFFFF;
-							n2SrcSize.LowPart = 0xFFFFFFFF;
-                            n2SrcSize.HighPart = 0xFFFFFFFF;
-						}
-						else
-						{	
-							// Source file size 
-							bool bSize = m_client->MyGetFileSize(m_client->m_szSrcFileName, &n2SrcSize); 
-							// dwSrcSize = GetFileSize(m_client->m_hSrcFile, NULL); 
-							// if (dwSrcSize == 0xFFFFFFFF)
-							if (!bSize)
-							{
-								helper::close_handle(m_client->m_hSrcFile);
-								n2SrcSize.LowPart = 0xFFFFFFFF;
-                                n2SrcSize.HighPart = 0xFFFFFFFF;
-							}
-							else
-							{
-								// Add the File Time Stamp to the filename
-								FILETIME SrcFileModifTime; 
-								BOOL fRes = GetFileTime(m_client->m_hSrcFile, NULL, NULL, &SrcFileModifTime);
-								if (fRes)
-								{
-									char szSrcFileTime[18];
-									// sf@2003 - Convert file time to local time
-									// We've made the choice off displaying all the files 
-									// off client AND server sides converted in clients local
-									// time only. So we don't convert server's files times.
-									
-									//FILETIME LocalFileTime;
-									//FileTimeToLocalFileTime(&SrcFileModifTime, &LocalFileTime);
-									
-									SYSTEMTIME FileTime;
-									FileTimeToSystemTime(&SrcFileModifTime,  &FileTime);
-									wsprintf(szSrcFileTime,"%2.2d/%2.2d/%4.4d %2.2d:%2.2d",
-											FileTime.wMonth,
-											FileTime.wDay,
-											FileTime.wYear,
-											FileTime.wHour,
-											FileTime.wMinute
-											);
-									strcat(m_client->m_szSrcFileName, ",");
-									strcat(m_client->m_szSrcFileName, szSrcFileTime);
-								}
-							}
-						}
-
-						// sf@2004 - Delta Transfer
-						if (m_client->m_lpCSBuffer != NULL) 
-						{
-							delete [] m_client->m_lpCSBuffer;
-							m_client->m_lpCSBuffer = NULL;
-						}
-						m_client->m_nCSOffset = 0;
-						m_client->m_nCSBufferSize = 0;
-
-						// Send the FileTransferMsg with rfbFileHeader
-						rfbFileTransferMsg ft;
-						
-						ft.type = rfbFileTransfer;
-						ft.contentType = rfbFileHeader;
-						ft.size = Swap32IfLE(n2SrcSize.LowPart); // File Size in bytes, 0xFFFFFFFF (-1) means error
-						ft.length = Swap32IfLE(strlen(m_client->m_szSrcFileName));
-						//adzm 2010-09 - minimize packets. SendExact flushes the queue.
-						m_socket->SendExactQueue((char *)&ft, sz_rfbFileTransferMsg, rfbFileTransfer);
-						m_socket->SendExactQueue((char *)m_client->m_szSrcFileName, strlen(m_client->m_szSrcFileName));
-						
-						// sf@2004 - Improving huge file size handling
-						CARD32 sizeH = Swap32IfLE(n2SrcSize.HighPart);
-						m_socket->SendExact((char *)&sizeH, sizeof(CARD32));
-
-						// delete [] szSrcFileName;
-						if (n2SrcSize.LowPart == 0xFFFFFFFF && n2SrcSize.HighPart == 0xFFFFFFFF)
-						{
-							//MessageBoxSecure(NULL, "6. Abort !", "Ultra WinVNC", MB_OK);
-							//vnclog.Print(LL_INTINFO, VNCLOG("*** FileTransfer: Wrong Src File size. Abort !\n"));
-                            m_client->FTUploadFailureHook();
-							break; // If error, we don't send anything else
-						}
-                        m_client->FTUploadStartHook();*/
-						}
+						m_client->filetransferrequestPart1(msg, fUserOk);						
 						break;
 
 					// sf@2004 - Delta Transfer
@@ -4654,11 +4500,10 @@ vncClient::vncClient() : Sendinput("USER32", "SendInput"), m_clipboard(Clipboard
 
 	//SINGLE WINDOW
 	m_use_NewSWSize = FALSE;
-	m_SWOffsetx=0;
-	vnclog.Print(LL_INTINFO, VNCLOG("TEST 4\n"));
-	m_SWOffsety=0;
-	m_ScreenOffsetx=0;
-	m_ScreenOffsety=0;
+	monitor_Offsetx = 0;
+	monitor_Offsety = 0;
+	m_ScreenOffsetx = 0;
+	m_ScreenOffsety = 0;
 
 	// sf@2002 
 	fNewScale = false;
@@ -4904,13 +4749,13 @@ vncClient::NotifyUpdate(rfbFramebufferUpdateRequestMsg fur)
 		rfb::Rect update;
 		// Get the specified rectangle as the region to send updates for
 		// Modif sf@2002 - Scaling.
-		update.tl.x = (Swap16IfLE(fur.x) + m_SWOffsetx) * m_nScale;
-		update.tl.y = (Swap16IfLE(fur.y) + m_SWOffsety) * m_nScale;
+		update.tl.x = (Swap16IfLE(fur.x) + monitor_Offsetx) * m_nScale;
+		update.tl.y = (Swap16IfLE(fur.y) + monitor_Offsety) * m_nScale;
 		update.br.x = update.tl.x + Swap16IfLE(fur.w) * m_nScale;
 		update.br.y = update.tl.y + Swap16IfLE(fur.h) * m_nScale;
 		// Verify max size, scaled changed on server while not pushed to viewer
-		if (update.tl.x< ((m_ScaledScreen.tl.x + m_SWOffsetx) * m_nScale)) update.tl.x = (m_ScaledScreen.tl.x + m_SWOffsetx) * m_nScale;
-		if (update.tl.y < ((m_ScaledScreen.tl.y + m_SWOffsety) * m_nScale)) update.tl.y = (m_ScaledScreen.tl.y + m_SWOffsety) * m_nScale;
+		if (update.tl.x< ((m_ScaledScreen.tl.x + monitor_Offsetx) * m_nScale)) update.tl.x = (m_ScaledScreen.tl.x + monitor_Offsetx) * m_nScale;
+		if (update.tl.y < ((m_ScaledScreen.tl.y + monitor_Offsety) * m_nScale)) update.tl.y = (m_ScaledScreen.tl.y + monitor_Offsety) * m_nScale;
 		if (update.br.x > (update.tl.x + (m_ScaledScreen.br.x-m_ScaledScreen.tl.x) * m_nScale)) update.br.x = update.tl.x + (m_ScaledScreen.br.x-m_ScaledScreen.tl.x) * m_nScale;
 		if (update.br.y > (update.tl.y + (m_ScaledScreen.br.y-m_ScaledScreen.tl.y) * m_nScale)) update.br.y = update.tl.y + (m_ScaledScreen.br.y-m_ScaledScreen.tl.y) * m_nScale;
 		rfb::Region2D update_rgn = update;
@@ -4924,19 +4769,13 @@ vncClient::NotifyUpdate(rfbFramebufferUpdateRequestMsg fur)
 			OutputDebugString(szText);		
 #endif
 
-		update.tl.x = (m_ScaledScreen.tl.x + m_SWOffsetx) * m_nScale;
-		update.tl.y = (m_ScaledScreen.tl.y + m_SWOffsety) * m_nScale;
+		update.tl.x = (m_ScaledScreen.tl.x + monitor_Offsetx) * m_nScale;
+		update.tl.y = (m_ScaledScreen.tl.y + monitor_Offsety) * m_nScale;
 		update.br.x = update.tl.x + (m_ScaledScreen.br.x-m_ScaledScreen.tl.x) * m_nScale;
 		update.br.y = update.tl.y + (m_ScaledScreen.br.y-m_ScaledScreen.tl.y) * m_nScale;
 
 		update_rgn=update;
 		}
-/*#ifdef _DEBUG
-										char			szText[256];
-										sprintf(szText,"Update asked for region %i %i %i %i %i \n",update.tl.x,update.tl.y,update.br.x,update.br.y,m_client->m_SWOffsetx);
-										OutputDebugString(szText);		
-#endif*/
-//				vnclog.Print(LL_SOCKERR, VNCLOG("Update asked for region %i %i %i %i %i\n"),update.tl.x,update.tl.y,update.br.x,update.br.y,m_client->m_SWOffsetx);
 
 		// RealVNC 336
 		if (update_rgn.is_empty()) {
@@ -4949,27 +4788,29 @@ vncClient::NotifyUpdate(rfbFramebufferUpdateRequestMsg fur)
 				return FALSE;
 		}
 
-		{
-			// lock removed, clipregion solve unwanted m_incr_rgn clear
-			//omni_mutex_lock l(GetUpdateLock(),92);
+#ifdef _DEBUG
+		char			szText[256];
+		sprintf(szText, " ++++++ rfbFramebufferUpdateRequestMsg\n");
+		OutputDebugString(szText);
+#endif
+	// Add the requested area to the incremental update cliprect
+	m_incr_rgn.assign_union(update_rgn);
+	// Is this request for a full update?
+	//Generate Black updates
+	if (!fur.incremental)
+	{
+		// Yes, so add the region to the update tracker
+		m_update_tracker.add_changed(update_rgn);// <<< Black updates
+			
+		// Tell the desktop grabber to fetch the region's latest state
+		m_encodemgr.m_buffer->m_desktop->UpdateFullScreen();
+	}
 
-	     	// Add the requested area to the incremental update cliprect
-			m_incr_rgn.assign_union(update_rgn);
-			// Is this request for a full update?
-			if (!fur.incremental)
-			{
-				// Yes, so add the region to the update tracker
-				m_update_tracker.add_changed(update_rgn);
-					
-				// Tell the desktop grabber to fetch the region's latest state
-				m_encodemgr.m_buffer->m_desktop->QueueRect(update);
-			}					
+    // Kick the update thread (and create it if not there already)
+	m_encodemgr.m_buffer->m_desktop->TriggerUpdate();
+	TriggerUpdateThread();
 
-		    // Kick the update thread (and create it if not there already)
-			m_encodemgr.m_buffer->m_desktop->TriggerUpdate();
-			TriggerUpdateThread();
-		}
-		return TRUE;
+	return TRUE;
 }
 
 void
@@ -4999,21 +4840,19 @@ void
 vncClient::UpdateMouse()
 {
 	RECT testrect;
-	testrect.top = m_encodemgr.m_buffer->m_desktop->m_Cliprect.tl.y;
-	testrect.bottom = m_encodemgr.m_buffer->m_desktop->m_Cliprect.br.y;
-	testrect.left = m_encodemgr.m_buffer->m_desktop->m_Cliprect.tl.x;
-	testrect.right = m_encodemgr.m_buffer->m_desktop->m_Cliprect.br.x;
-	{
-		POINT cursorPos;
-		GetCursorPos(&cursorPos);
-		if (!PtInRect(&testrect, cursorPos)) return;
-	}
-	
+	testrect.top = m_encodemgr.m_buffer->m_desktop->m_Cliprect.tl.y + m_ScreenOffsety + monitor_Offsety;
+	testrect.bottom = m_encodemgr.m_buffer->m_desktop->m_Cliprect.br.y + m_ScreenOffsety + monitor_Offsety;
+	testrect.left = m_encodemgr.m_buffer->m_desktop->m_Cliprect.tl.x + m_ScreenOffsetx + monitor_Offsetx;
+	testrect.right = m_encodemgr.m_buffer->m_desktop->m_Cliprect.br.x + m_ScreenOffsetx + monitor_Offsetx;
 
-	if (!m_mousemoved && !m_cursor_update_sent)
-	{
-	omni_mutex_lock l(GetUpdateLock(),93);
-    m_mousemoved=TRUE;
+	POINT cursorPos;
+	GetCursorPos(&cursorPos);
+	if (!PtInRect(&testrect, cursorPos)) 
+		return;
+
+	if (!m_mousemoved && !m_cursor_update_sent) {
+		omni_mutex_lock l(GetUpdateLock(),93);
+		m_mousemoved=TRUE;
 	}
 	// nyama/marscha - PointerPos
 	// PointerPos code doesn take in account prim/secundary display
@@ -5021,8 +4860,8 @@ vncClient::UpdateMouse()
 	if (m_use_PointerPos && !m_cursor_pos_changed) {
 		POINT cursorPos;
 		GetCursorPos(&cursorPos);
-		cursorPos.x=cursorPos.x-(m_ScreenOffsetx+m_SWOffsetx);
-		cursorPos.y=cursorPos.y-(m_ScreenOffsety+m_SWOffsety);
+		cursorPos.x=cursorPos.x-(m_ScreenOffsetx+monitor_Offsetx);
+		cursorPos.y=cursorPos.y-(m_ScreenOffsety+monitor_Offsety);
 		//vnclog.Print(LL_INTINFO, VNCLOG("UpdateMouse m_cursor_pos(%d, %d), new(%d, %d)\n"), 
 		//  m_cursor_pos.x, m_cursor_pos.y, cursorPos.x, cursorPos.y);
 		if (cursorPos.x != m_cursor_pos.x || cursorPos.y != m_cursor_pos.y) {
@@ -5339,7 +5178,7 @@ vncClient::SendUpdate(rfb::SimpleUpdateTracker &update)
 	header.nRects = Swap16IfLE(updates);
 	//adzm 2010-09 - minimize packets. SendExact flushes the queue.
 	if (!SendRFBMsgQueue(rfbFramebufferUpdate, (BYTE *) &header, sz_rfbFramebufferUpdateMsg))
-		return TRUE;
+		return FALSE;
 	
 	// CURSOR HANDLING
 	if (m_cursor_update_pending) {
@@ -5420,6 +5259,15 @@ vncClient::SendRectangles(const rfb::RectVector &rects)
 			rect.br.x=(*i).br.x;
 			rect.tl.y=(*i).tl.y;
 			rect.br.y=(*i).br.y;
+/*#ifdef _DEBUG
+			char			szText[256];
+							
+				sprintf(szText,"RECT m_encodemgr  %i %i %i %i \n",rect.tl.x,
+				rect.tl.y,
+				rect.br.x,
+				rect.br.y);
+				OutputDebugString(szText);
+#endif*/
 
 			if ((rect.br.x-rect.tl.x) * (rect.br.y-rect.tl.y) > Blocksize*BlocksizeX )
 			{
@@ -5467,11 +5315,11 @@ vncClient::SendRectangle(const rfb::Rect &rect)
 	ScaledRect.br.y = rect.br.y / m_nScale;
 	ScaledRect.tl.x = rect.tl.x / m_nScale;
 	ScaledRect.br.x = rect.br.x / m_nScale;
-	#ifdef _DEBUG
+	/*#ifdef _DEBUG
 	char			szText[256];
 	sprintf(szText,"++++++++++++++++++++++++++++++++++++++++++++++REct1 %i %i %i %i  \n",rect.tl.x,rect.br.x,rect.tl.y,rect.br.y);
 	OutputDebugString(szText);
-	#endif
+	#endif*/
 
 	//	Totalsend+=(ScaledRect.br.x-ScaledRect.tl.x)*(ScaledRect.br.y-ScaledRect.tl.y);
 
@@ -5579,16 +5427,16 @@ vncClient::SendCopyRect(const rfb::Rect &dest, const rfb::Point &source)
 	// Create the message header
 	// Modif sf@2002 - Scaling
 	rfbFramebufferUpdateRectHeader copyrecthdr;
-	copyrecthdr.r.x = Swap16IfLE((dest.tl.x - m_SWOffsetx) / m_nScale );
-	copyrecthdr.r.y = Swap16IfLE((dest.tl.y - m_SWOffsety) / m_nScale);
+	copyrecthdr.r.x = Swap16IfLE((dest.tl.x - monitor_Offsetx) / m_nScale );
+	copyrecthdr.r.y = Swap16IfLE((dest.tl.y - monitor_Offsety) / m_nScale);
 	copyrecthdr.r.w = Swap16IfLE((dest.br.x - dest.tl.x) / m_nScale);
 	copyrecthdr.r.h = Swap16IfLE((dest.br.y - dest.tl.y) / m_nScale);
 	copyrecthdr.encoding = Swap32IfLE(rfbEncodingCopyRect);
 
 	// Create the CopyRect-specific section
 	rfbCopyRect copyrectbody;
-	copyrectbody.srcX = Swap16IfLE((source.x- m_SWOffsetx) / m_nScale);
-	copyrectbody.srcY = Swap16IfLE((source.y- m_SWOffsety) / m_nScale);
+	copyrectbody.srcX = Swap16IfLE((source.x- monitor_Offsetx) / m_nScale);
+	copyrectbody.srcY = Swap16IfLE((source.y- monitor_Offsety) / m_nScale);
 
 	// Now send the message;
 	if (!m_socket->SendExactQueue((char *)&copyrecthdr, sizeof(copyrecthdr)))
@@ -5662,19 +5510,18 @@ vncClient::SendPalette()
 }
 
 void
-vncClient::SetSWOffset(int x,int y)
+vncClient::SetBufferOffset(int x,int y)
 {
-	//if (m_SWOffsetx!=x || m_SWOffsety!=y) m_encodemgr.m_buffer->ClearCache();
-	m_SWOffsetx=x;
-	m_SWOffsety=y;
-	m_encodemgr.SetSWOffset(x,y);
+	monitor_Offsetx=x;
+	monitor_Offsety=y;
+	m_encodemgr.SetBufferOffset(x,y);
 }
 
 void
 vncClient::SetScreenOffset(int x,int y,int type)
 {
-	m_ScreenOffsetx=x;
-	m_ScreenOffsety=y;
+	m_ScreenOffsetx = x;
+	m_ScreenOffsety = y;
 	m_display_type=type;
 }
 
@@ -5713,8 +5560,8 @@ vncClient::SendCacheRect(const rfb::Rect &dest)
 	// Modif rdv@2002 - v1.1.x - Application Resize
 	// Modif sf@2002 - Scaling
 	rfbFramebufferUpdateRectHeader cacherecthdr;
-	cacherecthdr.r.x = Swap16IfLE((dest.tl.x - m_SWOffsetx) / m_nScale );
-	cacherecthdr.r.y = Swap16IfLE((dest.tl.y - m_SWOffsety) / m_nScale);
+	cacherecthdr.r.x = Swap16IfLE((dest.tl.x - monitor_Offsetx) / m_nScale );
+	cacherecthdr.r.y = Swap16IfLE((dest.tl.y - monitor_Offsety) / m_nScale);
 	cacherecthdr.r.w = Swap16IfLE((dest.br.x - dest.tl.x) / m_nScale);
 	cacherecthdr.r.h = Swap16IfLE((dest.br.y - dest.tl.y) / m_nScale);
 	cacherecthdr.encoding = Swap32IfLE(rfbEncodingCache);
@@ -5818,8 +5665,8 @@ BOOL vncClient::SendCacheZip(const rfb::RectVector &rects)
 	BYTE* p = m_pRawCacheZipBuf;
 	for (i = rects.begin();i != rects.end();i++)
 	{
-		theRect.x = Swap16IfLE(((*i).tl.x - m_SWOffsetx) / m_nScale );
-		theRect.y = Swap16IfLE(((*i).tl.y - m_SWOffsety) / m_nScale);
+		theRect.x = Swap16IfLE(((*i).tl.x - monitor_Offsetx) / m_nScale );
+		theRect.y = Swap16IfLE(((*i).tl.y - monitor_Offsety) / m_nScale);
 		theRect.w = Swap16IfLE(((*i).br.x - (*i).tl.x) / m_nScale);
 		theRect.h = Swap16IfLE(((*i).br.y - (*i).tl.y) / m_nScale);
 		memcpy(p, (BYTE*)&theRect, sz_rfbRectangle);
@@ -6067,7 +5914,6 @@ void vncClient::FinishFileReception()
 
 	m_fFileDownloadRunning = false;
 	m_socket->SetRecvTimeout(m_server->AutoIdleDisconnectTimeout()*1000);
-    SendKeepAlive(true);
 
 	// sf@2004 - Delta transfer
 	SetEndOfFile(m_hDestFile);
@@ -6683,13 +6529,13 @@ void vncClient::SendKeepAlive(bool bForce)
 		DWORD nInterval = (DWORD)m_server->GetKeepAliveInterval() * 1000;
 		DWORD nTicksSinceLastSent = GetTickCount() - m_socket->GetLastSentTick();
 
-        if (!bForce && nTicksSinceLastSent < nInterval)
+        if ((!bForce && nTicksSinceLastSent < nInterval) || nInterval == 0)
             return;
 
         rfbKeepAliveMsg kp;
         memset(&kp, 0, sizeof kp);
         kp.type = rfbKeepAlive;
-
+		omni_mutex_lock l(GetUpdateLock(),255);
 		m_socket->SendExact((char*)&kp, sz_rfbKeepAliveMsg, rfbKeepAlive);
     }
 }
@@ -6761,6 +6607,7 @@ int  vncClient::filetransferrequestPart1(rfbClientToServerMsg msg, bool fUserOk)
 	}	
 	DWORD dwTId;
 	ThreadHandleCompressFolder = CreateThread(NULL, 0, CompressFolder, this, 0, &dwTId);	
+	return 1;
 }
 
 

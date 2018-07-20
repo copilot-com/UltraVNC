@@ -80,7 +80,7 @@ public:
 		MIN_UPDATE_INTERVAL_MAX=500;
 		MIN_UPDATE_INTERVAL_MIN=33;
 		// replaced by macpu ini setting
-		MAX_CPU_USAGE=20;
+		//MAX_CPU_USAGE=20;
 		monitor_sleep_timer=0;
 	};
 protected:
@@ -93,6 +93,9 @@ protected:
 private:
 	bool handle_display_change(HANDLE& threadhandle, rfb::Region2D& rgncache, rfb::SimpleUpdateTracker& clipped_updates, rfb::ClippedUpdateTracker& updates);
 	void do_polling(HANDLE& threadHandle, rfb::Region2D& rgncache, int& fullpollcounter, bool cursormoved);
+	int mon[2];
+	void SetFirstMonitorNummers();
+	void SetLastMonitorNummers();
 
 public:
 	virtual BOOL Init(vncDesktop *desktop, vncServer *server);
@@ -127,9 +130,8 @@ protected:
 	DWORD MIN_UPDATE_INTERVAL;
 	DWORD MIN_UPDATE_INTERVAL_MAX;
 	DWORD MIN_UPDATE_INTERVAL_MIN;
-	DWORD MAX_CPU_USAGE;
+	//DWORD MAX_CPU_USAGE;
 	bool capture;
-	bool first_run;
 	bool initialupdate;
 	DWORD monitor_sleep_timer;
 

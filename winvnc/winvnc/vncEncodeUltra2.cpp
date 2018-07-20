@@ -131,8 +131,8 @@ vncEncodeUltra2::EncodeRect(BYTE *source, VSocket *outConn, BYTE *dest, const rf
 
 	rfbFramebufferUpdateRectHeader *surh=(rfbFramebufferUpdateRectHeader *)dest;
 	// Modif rdv@2002 - v1.1.x - Application Resize
-	surh->r.x = (CARD16) rect.tl.x-m_SWOffsetx;
-	surh->r.y = (CARD16) rect.tl.y-m_SWOffsety;
+	surh->r.x = (CARD16) rect.tl.x-monitor_Offsetx;
+	surh->r.y = (CARD16) rect.tl.y-monitor_Offsety;
 	surh->r.w = (CARD16) (rectW);
 	surh->r.h = (CARD16) (rectH);
 	surh->r.x = Swap16IfLE(surh->r.x);
@@ -157,8 +157,14 @@ vncEncodeUltra2::EncodeRect(BYTE *source, VSocket *outConn, BYTE *dest, const rf
 	// Translate the data into our new buffer
 	Translate(source, m_buffer, rect);
 	rfbZlibHeader *zlibh=(rfbZlibHeader *)(dest+sz_rfbFramebufferUpdateRectHeader);
+	Size=0;
+	if (rectW >= 4 && rectH >= 4)
+	{
+		Size=SendJpegRect(m_buffer,dest+sz_rfbFramebufferUpdateRectHeader+sz_rfbZlibHeader, rawDataSize, rectW , rectH , m_qualitylevel*10,m_remoteformat);		
+		zlibh->nBytes = Swap32IfLE(Size);
+	}
 
-	if ((rectW*rectH)<1024)
+	if (Size == 0)
 	{
 		
 		if (rawDataSize < 64)
@@ -178,11 +184,6 @@ vncEncodeUltra2::EncodeRect(BYTE *source, VSocket *outConn, BYTE *dest, const rf
 		surh->encoding = Swap32IfLE(rfbEncodingUltra);
 		zlibh->nBytes = Swap32IfLE(out_len);
 		Size=out_len;
-	}
-	else
-	{
-		Size=SendJpegRect(m_buffer,dest+sz_rfbFramebufferUpdateRectHeader+sz_rfbZlibHeader, rawDataSize, rectW , rectH , m_qualitylevel*10,m_remoteformat);		
-		zlibh->nBytes = Swap32IfLE(Size);
 	}
 	transmittedSize += sz_rfbFramebufferUpdateRectHeader + sz_rfbZlibHeader+ Size;
 	return sz_rfbFramebufferUpdateRectHeader + sz_rfbZlibHeader+ Size;
@@ -237,11 +238,18 @@ vncEncodeUltra2::SendJpegRect(BYTE *src,BYTE *dst, int dst_size, int w, int h, i
 
   jpeg_set_defaults(&cinfo);
   jpeg_set_quality(&cinfo, quality, TRUE);
-  if(quality >= 96) cinfo.dct_method = JDCT_ISLOW;
-  else cinfo.dct_method = JDCT_FASTEST;
-
-   cinfo.comp_info[0].h_samp_factor = 2;
-   cinfo.comp_info[0].v_samp_factor = 2;
+  if(quality >= 90) 
+	  cinfo.dct_method = JDCT_ISLOW;
+  else 
+	  cinfo.dct_method = JDCT_FASTEST;
+  if(quality >= 60) {
+	cinfo.comp_info[0].h_samp_factor = 2;
+	cinfo.comp_info[0].v_samp_factor = 2;
+  }
+  if(quality >= 70) {
+	cinfo.comp_info[0].h_samp_factor = 1;
+	cinfo.comp_info[0].v_samp_factor = 1;
+  }
 
   JpegSetDstManager(&cinfo, dst, dst_size);
 

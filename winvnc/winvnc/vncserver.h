@@ -141,17 +141,14 @@ public:
 	virtual BOOL AddNotify(HWND hwnd);
 	virtual BOOL RemNotify(HWND hwnd);
 
-	// Modif sf@2002 - Single Window
-	virtual void SingleWindow(BOOL fEnabled) { m_SingleWindow = fEnabled; };
-	virtual BOOL SingleWindow() { return m_SingleWindow; };
-	virtual void SetSingleWindowName(const char *szName);
-	virtual char *GetWindowName() { return m_szWindowName; };
 	virtual vncDesktop* GetDesktopPointer() {return m_desktop;}
 	virtual void SetNewSWSize(long w,long h,BOOL desktop);
 	virtual void SetNewSWSizeFR(long w,long h,BOOL desktop);
-	virtual void SetSWOffset(int x,int y);
+	virtual void SetBufferOffset(int x,int y);
 	virtual void SetScreenOffset(int x,int y,int type); //never locked
 	virtual void InitialUpdate(bool value);
+	virtual void AutoCapt(int autocapt);
+	virtual int AutoCapt() { return m_autocapt; }
 
 	virtual BOOL All_clients_initialalized();
 
@@ -162,6 +159,7 @@ public:
 
 	UINT				m_port;
 	UINT				m_port_http; // TightVNC 1.2.7
+	int					m_autocapt;
 
 	virtual void ShutdownServer();
 
@@ -557,10 +555,6 @@ protected:
 
 	// Set of windows to send notifications to
 	vncNotifyList		m_notifyList;
-
-		// Modif sf@2002 - Single Window
-	BOOL    m_SingleWindow;
-	char    m_szWindowName[32]; // to keep the window name
 
 	// Modif sf@2002
 	BOOL    m_TurboMode;

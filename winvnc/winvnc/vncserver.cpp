@@ -194,10 +194,6 @@ vncServer::vncServer()
 	m_clientquitsig = new omni_condition(&m_clientsLock);
 
 	// Modif sf@2002
-	m_SingleWindow = FALSE;
-	strcpy(m_szWindowName, "");
-
-	// Modif sf@2002
 	m_TurboMode = false;
 	// m_fCursorMoved = false;
 
@@ -239,6 +235,8 @@ vncServer::vncServer()
 	//adzm 2010-05-12 - dsmplugin config
 	m_szDSMPluginConfig[0] = '\0';
 	OS_Shutdown=false;
+
+	m_autocapt = 1;
 }
 
 vncServer::~vncServer()
@@ -2069,12 +2067,6 @@ vncServer::RemAuthHostsBlacklist(const char *machine) {
 	}
 }
 
-// Modif sf@2002
-void vncServer::SetSingleWindowName(const char *szName)
-{
-    memcpy(m_szWindowName, szName, 32);
-}
-
 // Modef rdv@202
 void
 vncServer::SetNewSWSize(long w,long h,BOOL desktop)
@@ -2113,7 +2105,7 @@ vncServer::SetNewSWSizeFR(long w,long h,BOOL desktop)
 }
 
 void
-vncServer::SetSWOffset(int x,int y)
+vncServer::SetBufferOffset(int x,int y)
 {
 	vncClientList::iterator i;
 		
@@ -2123,7 +2115,7 @@ vncServer::SetSWOffset(int x,int y)
 	for (i = m_authClients.begin(); i != m_authClients.end(); i++)
 	{
 		// Post the update
-		GetClient(*i)->SetSWOffset(x,y);
+		GetClient(*i)->SetBufferOffset(x,y);
 	}
 
 }
@@ -2637,4 +2629,9 @@ void vncServer::StopReconnectAll()
 void vncServer::SetFTTimeout(int msecs)
 {
     m_ftTimeout = msecs;
+}
+
+void vncServer::AutoCapt(int autocapt)
+{
+	m_autocapt = autocapt; 
 }

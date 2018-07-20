@@ -145,14 +145,14 @@ public:
 	//     AND no changed or copied updates intersect it
 	virtual BOOL UpdateWanted() {
 		omni_mutex_lock l(GetUpdateLock(),324);
-/*#ifdef _DEBUG
+#ifdef _DEBUG
 										char			szText[256];
 										sprintf(szText," UpdateWanted %i %i %i %i \n",!m_incr_rgn.is_empty(),
 											m_incr_rgn.intersect(m_update_tracker.get_changed_region()).is_empty() ,
 											m_incr_rgn.intersect(m_update_tracker.get_cached_region()).is_empty() ,
 											m_incr_rgn.intersect(m_update_tracker.get_copied_region()).is_empty());
 										OutputDebugString(szText);		
-#endif*/
+#endif
 		BOOL value =!m_incr_rgn.is_empty() &&m_incr_rgn.intersect(m_update_tracker.get_changed_region()).is_empty() &&
 			m_incr_rgn.intersect(m_update_tracker.get_cached_region()).is_empty() &&
 			m_incr_rgn.intersect(m_update_tracker.get_copied_region()).is_empty();
@@ -204,7 +204,7 @@ public:
 	// resize desktop
 	virtual BOOL SetNewSWSize(long w,long h,BOOL desktop);
 	virtual BOOL SetNewSWSizeFR(long w,long h,BOOL desktop);
-	virtual void SetSWOffset(int x,int y);
+	virtual void SetBufferOffset(int x,int y);
 	virtual void SetScreenOffset(int x,int y,int type);
 	virtual void InitialUpdate(bool value);
 
@@ -412,8 +412,8 @@ protected:
 public:
 
 	rfb::UpdateTracker &GetUpdateTracker() {return m_update_tracker;};
-	int				m_SWOffsetx;
-	int				m_SWOffsety;
+	int				monitor_Offsetx;
+	int				monitor_Offsety;
 	int				m_ScreenOffsetx;
 	int				m_ScreenOffsety;
 	int				m_display_type;

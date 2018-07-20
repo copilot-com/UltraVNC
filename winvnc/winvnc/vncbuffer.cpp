@@ -55,8 +55,7 @@ vncBuffer::vncBuffer()
 
 	nRowIndex = 0;
 	m_cursorpending = false;
-	m_single_monitor=0;
-	m_multi_monitor=1;
+	m_multi_monitor = 1;
 
 	// sf@2005 - Grey Palette
 	m_fGreyPalette = false;
@@ -517,6 +516,7 @@ void vncBuffer::CheckRect(rfb::Region2D &dest, rfb::Region2D &cacheRgn, const rf
 						dest.assign_union(new_rect);
 
 					// Copy the changes to the back buffer
+					//  HOTSPOT
 					for (by = ((fSmallRect) ? ay : y); by < blockbottom; by++)
 					{
 						memcpy(y_o_ptr, y_n_ptr, bytesPerBlockRow);
@@ -1038,7 +1038,12 @@ vncBuffer::ClearBack()
 		memset(m_mainbuff, 0, m_desktop->ScreenBuffSize());
 	}
 
-	if (m_mainbuff) memcpy(m_backbuff, m_mainbuff, m_desktop->ScreenBuffSize());
+	if (m_mainbuff) 
+		memcpy(m_backbuff, m_mainbuff, m_desktop->ScreenBuffSize());
+	//BlackBack();
+	InvalidateRect(NULL, NULL, true);
+	Sleep(100);
+	m_desktop->UpdateFullScreen();
 }
 
 //***************************
@@ -1165,15 +1170,16 @@ vncBuffer::IsShapeCleared()
 void
 vncBuffer::MultiMonitors(int number)
 {
-	if (number==1) {m_single_monitor=true;m_multi_monitor=false;}
-	if (number==2) {m_single_monitor=false;m_multi_monitor=true;}
+	if (number==1) 
+		m_multi_monitor = false;
+	if (number==2) 
+		m_multi_monitor = true;
 }
 
 bool
 vncBuffer::IsMultiMonitor()
 {
-	if (m_single_monitor) return false;//we need at least 1 display
-	else return true;
+	return m_multi_monitor;
 }
 
 bool

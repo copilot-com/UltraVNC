@@ -193,6 +193,7 @@ public:
 	// The size of the current client area
 	int m_cliwidth, m_cliheight;
 	void WriteExact(char *buf, int bytes); //adzm 2010-09
+	void WriteExactFT(char *buf, int bytes);
 
 private:
 #ifdef _Gii
@@ -452,11 +453,14 @@ private:
 	//adzm 2010-09	
 	bool WriteExactProxy(char *buf, int bytes); // same as Write
 	void WriteExact(char *buf, int bytes, CARD8 msgType); //sf@2002 - DSM Plugin
+	void WriteExactFT(char *buf, int bytes, CARD8 msgType); //sf@2002 - DSM Plugin
 
 	//adzm 2010-09
 	bool WriteQueue(char *buf, int bytes); // no DSM transform etc
 	void WriteExactQueue(char *buf, int bytes);
+	void WriteExactFTQueue(char *buf, int bytes);
 	void WriteExactQueue(char *buf, int bytes, CARD8 msgType); //sf@2002 - DSM Plugin
+	void WriteExactFTQueue(char *buf, int bytes, CARD8 msgType); //sf@2002 - DSM Plugin
 	void WriteExactQueue_timeout(char *buf, int bytes,int timeout);
 	void WriteExactQueue_timeout(char *buf, int bytes, CARD8 msgType,int timeout); //sf@2002 - DSM Plugin
 
@@ -805,7 +809,7 @@ private:
 	UINT m_fullupdate_timer;
 	UINT m_idle_timer;
 	UINT m_idle_time;
-	ViewerDirectxClass directx_output;
+	ViewerDirectxClass *directx_output;
 	bool directx_used;
 
 

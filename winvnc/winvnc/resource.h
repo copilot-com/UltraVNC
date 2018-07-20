@@ -54,6 +54,7 @@
 #define IDC_VNCLOGO                     1016
 #define IDC_CONNSETTINGS_BORDER         1016
 #define IDC_HOSTS                       1016
+#define IDC_POLL_FOREGROUND2            1016
 #define IDC_VERSION                     1017
 #define IDC_DISPLAY_NO_LABEL            1017
 #define IDC_NAME                        1018
@@ -148,10 +149,13 @@
 #define IDC_CHECKDRIVER                 1096
 #define IDC_RADIO1                      1097
 #define IDC_MV1                         1097
+#define IDC_AUTOCAPT1                   1097
 #define IDC_RADIO2                      1098
 #define IDC_MV2                         1098
+#define IDC_AUTOCAPT2                   1098
 #define IDC_RADIO3                      1099
 #define IDC_MV3                         1099
+#define IDC_AUTOCAPT3                   1099
 #define IDC_RADIO4                      1100
 #define IDC_MV4                         1100
 #define IDC_LOOPBACKONLY                1101
@@ -184,6 +188,7 @@
 #define IDC_CHECK4                      1132
 #define IDC_IPV6                        1132
 #define IDC_Path2                       1133
+#define IDC_STATICELEVATED              1133
 #define IDC_Path3                       1134
 #define IDC_LOCALTEXT_EDIT              1140
 #define IDC_INPUTAREA_EDIT              1140
@@ -279,9 +284,9 @@
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        170
+#define _APS_NEXT_RESOURCE_VALUE        172
 #define _APS_NEXT_COMMAND_VALUE         40030
-#define _APS_NEXT_CONTROL_VALUE         1133
+#define _APS_NEXT_CONTROL_VALUE         1134
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

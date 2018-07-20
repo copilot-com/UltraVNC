@@ -53,8 +53,11 @@ DWORD GetExplorerLogonPid();
 // Constructor & Destructor
 vncPropertiesPoll::vncPropertiesPoll()
 {
+	ddEngine = false;
 	m_dlgvisible = FALSE;
 	m_usersettings = TRUE;
+	if (IsWindows8OrGreater())
+		ddEngine = true;
 }
 
 vncPropertiesPoll::~vncPropertiesPoll()
@@ -283,7 +286,11 @@ vncPropertiesPoll::DialogProcPoll(HWND hwnd,
 
 			_this = (vncPropertiesPoll *) lParam;
 			_this->m_dlgvisible = TRUE;
-
+			if (_this->ddEngine) {
+				ShowWindow(GetDlgItem(hwnd, IDC_CHECKDRIVER), false);
+				ShowWindow(GetDlgItem(hwnd, IDC_STATICELEVATED), false);
+				SetWindowText(GetDlgItem(hwnd, IDC_DRIVER), "Desktop Duplication (restart on change required)");
+			}
 			if (_this->m_fUseRegistry)
 			{
 				_this->Load(_this->m_usersettings);
@@ -355,16 +362,14 @@ vncPropertiesPoll::DialogProcPoll(HWND hwnd,
 				_this->m_server->PollUnderCursor() || _this->m_server->PollForeground()
 				);
 
-			// [v1.0.2-jp2 fix-->]
-			HWND hSingleWindow = GetDlgItem(hwnd, IDC_SINGLE_WINDOW);
-			SendMessage(hSingleWindow, BM_SETCHECK, _this->m_server->SingleWindow(), 0);
-
-			HWND hWindowName = GetDlgItem(hwnd, IDC_NAME_APPLI);
-			if ( _this->m_server->GetWindowName() != NULL){
-			   SetDlgItemText(hwnd, IDC_NAME_APPLI,_this->m_server->GetWindowName());
-			}
-			EnableWindow(hWindowName, _this->m_server->SingleWindow());
 			// [<--v1.0.2-jp2 fix]
+
+			CheckDlgButton(hwnd, IDC_AUTOCAPT1,
+					(_this->m_pref_autocapt == 1) ? BST_CHECKED : BST_UNCHECKED);
+			CheckDlgButton(hwnd, IDC_AUTOCAPT2,
+					(_this->m_pref_autocapt == 2) ? BST_CHECKED : BST_UNCHECKED);
+			CheckDlgButton(hwnd, IDC_AUTOCAPT3,
+					(_this->m_pref_autocapt == 3) ? BST_CHECKED : BST_UNCHECKED);
 
 			SetForegroundWindow(hwnd);
 
@@ -383,6 +388,17 @@ vncPropertiesPoll::DialogProcPoll(HWND hwnd,
 				int maxcpu = GetDlgItemInt(hwnd, IDC_MAXCPU, NULL, FALSE);
 				_this->m_server->MaxCpu(maxcpu);
 
+				HWND hcapt = GetDlgItem(hwnd, IDC_AUTOCAPT1);
+				if (SendMessage(hcapt, BM_GETCHECK, 0, 0) == BST_CHECKED)
+						_this->m_pref_autocapt = 1;
+				hcapt = GetDlgItem(hwnd, IDC_AUTOCAPT2);
+				if (SendMessage(hcapt, BM_GETCHECK, 0, 0) == BST_CHECKED)
+						_this->m_pref_autocapt = 2;
+				hcapt = GetDlgItem(hwnd, IDC_AUTOCAPT3);
+				if (SendMessage(hcapt, BM_GETCHECK, 0, 0) == BST_CHECKED)
+						_this->m_pref_autocapt = 3;
+
+				_this->m_server->AutoCapt(_this->m_pref_autocapt);
 				// Modif sf@2002
 				HWND hTurboMode = GetDlgItem(hwnd, IDC_TURBOMODE);
 				_this->m_server->TurboMode(SendMessage(hTurboMode, BM_GETCHECK, 0, 0) == BST_CHECKED);
@@ -424,17 +440,6 @@ vncPropertiesPoll::DialogProcPoll(HWND hwnd,
 					SendMessage(hPollOnEventOnly, BM_GETCHECK, 0, 0) == BST_CHECKED
 					);
 
-				// [v1.0.2-jp2 fix-->] Move to vncpropertiesPoll.cpp
-				HWND hSingleWindow = GetDlgItem(hwnd, IDC_SINGLE_WINDOW);
-				_this->m_server->SingleWindow(SendMessage(hSingleWindow, BM_GETCHECK, 0, 0) == BST_CHECKED);
-
-				char szName[32];
-				if (GetDlgItemText(hwnd, IDC_NAME_APPLI, (LPSTR) szName, 32) == 0){
-					vnclog.Print(LL_INTINFO,VNCLOG("Error while reading Window Name %d \n"), GetLastError());
-				}
-				else{
-					_this->m_server->SetSingleWindowName(szName);
-				}
 				// [<--v1.0.2-jp2 fix] Move to vncpropertiesPoll.cpp
 
 				// Save the settings
@@ -460,15 +465,6 @@ vncPropertiesPoll::DialogProcPoll(HWND hwnd,
 				return TRUE;
 			}
 
-		// [v1.0.2-jp2 fix-->] Move to vncpropertiesPoll.cpp
-		 case IDC_SINGLE_WINDOW:
-			 {
-				 HWND hSingleWindow = GetDlgItem(hwnd, IDC_SINGLE_WINDOW);
-				 BOOL fSingleWindow = (SendMessage(hSingleWindow, BM_GETCHECK,0, 0) == BST_CHECKED);
-				 HWND hWindowName   = GetDlgItem(hwnd, IDC_NAME_APPLI);
-				 EnableWindow(hWindowName, fSingleWindow);
-			 }
-			 return TRUE;
 		// [<--v1.0.2-jp2 fix] Move to vncpropertiesPoll.cpp
 
 		 case IDCANCEL:
@@ -746,6 +742,7 @@ LABELUSERSETTINGS:
 	m_pref_Driver=CheckVideoDriver(0);
 	m_pref_Hook=TRUE;
 	m_pref_Virtual=FALSE;
+	m_pref_autocapt=1;
 
 	// [v1.0.2-jp2 fix]
 	m_pref_SingleWindow = 0;
@@ -819,6 +816,7 @@ vncPropertiesPoll::LoadUserPrefsPoll(HKEY appkey)
 	// [v1.0.2-jp2 fix]
 	m_pref_SingleWindow=LoadInt(appkey, "SingleWindow", m_pref_SingleWindow);
 	LoadSingleWindowName(appkey, m_pref_szSingleWindowName);
+	m_pref_autocapt=LoadInt(appkey, "autocapt", m_pref_autocapt);
 
 }
 
@@ -840,9 +838,7 @@ vncPropertiesPoll::ApplyUserPrefs()
 	else m_server->Driver(false);
 	m_server->Hook(m_pref_Hook);
 	m_server->Virtual(m_pref_Virtual);
-	// [v1.0.2-jp2 fix]
-	m_server->SingleWindow(m_pref_SingleWindow);
-	m_server->SetSingleWindowName(m_pref_szSingleWindowName);
+	m_server->AutoCapt(m_pref_autocapt);
 
 }
 
@@ -930,9 +926,7 @@ vncPropertiesPoll::SaveUserPrefsPoll(HKEY appkey)
 	SaveInt(appkey, "EnableDriver", m_server->Driver());
 	SaveInt(appkey, "EnableHook", m_server->Hook());
 	SaveInt(appkey, "EnableVirtual", m_server->Virtual());
-	// [v1.0.2-jp2 fix]
-	SaveInt(appkey, "SingleWindow", m_server->SingleWindow());
-	SaveString(appkey, "SingleWindowName", m_server->GetWindowName());
+	SaveInt(appkey, "autocapt", m_server->AutoCapt());
 }
 
 
@@ -960,7 +954,7 @@ void vncPropertiesPoll::LoadFromIniFile()
 	m_pref_Driver=CheckVideoDriver(0);
 	m_pref_Hook=TRUE;
 	m_pref_Virtual=FALSE;
-
+	m_pref_autocapt=1;
 	m_pref_SingleWindow = 0;
 	*m_pref_szSingleWindowName = '\0';
 
@@ -987,6 +981,7 @@ void vncPropertiesPoll::LoadUserPrefsPollFromIniFile()
 	
 	m_pref_SingleWindow=myIniFile.ReadInt("poll","SingleWindow",m_pref_SingleWindow);
 	myIniFile.ReadString("poll", "SingleWindowName", m_pref_szSingleWindowName,32);
+	m_pref_autocapt = myIniFile.ReadInt("poll", "autocapt", m_pref_autocapt);
 
 }
 
@@ -1030,8 +1025,6 @@ void vncPropertiesPoll::SaveUserPrefsPollToIniFile()
 	myIniFile.WriteInt("poll", "EnableDriver", m_server->Driver());
 	myIniFile.WriteInt("poll", "EnableHook", m_server->Hook());
 	myIniFile.WriteInt("poll", "EnableVirtual", m_server->Virtual());
-
-	myIniFile.WriteInt("poll", "SingleWindow", m_server->SingleWindow());
-	myIniFile.WriteString("poll", "SingleWindowName", m_server->GetWindowName());
-	
+	int test = m_server->AutoCapt();
+	myIniFile.WriteInt("poll", "autocapt", m_server->AutoCapt());	
 }

@@ -50,6 +50,7 @@ class vncServer;
 
 // Modif rdv@2002 - v1.1.x - videodriver
 #include "videodriver.h"
+#include "DeskDupEngine.h"
 
 // Modif sf@2002 - v1.1.0
 #include <list>
@@ -176,11 +177,6 @@ extern const char szDesktopSink[];
 #define ERROR_DESKTOP_OUT_OF_MEMORY                     11
 #define ERROR_DESKTOP_NO_DIBSECTION_OR_COMPATBITMAP     12
 #define ERROR_DESKTOP_NO_DESKTOPTHREAD                  13
-typedef struct DrvWatch
-{
-	HWND hwnd;
-	bool *stop;
-}DrvWatch;
 
 typedef BOOL (*SetHooksFn)(DWORD thread_id,UINT UpdateMsg,UINT CopyMsg,UINT MouseMsg,BOOL ddihook);
 typedef BOOL (*UnSetHooksFn)(DWORD thread_id);
@@ -263,7 +259,7 @@ public:
 	DWORD Init(vncServer *pSrv);
 
 	// Tell the desktop hooks to grab & update a particular rectangle
-	void QueueRect(const rfb::Rect &rect);
+	void UpdateFullScreen();
 	
 	// Kick the desktop hooks to perform an update
 	void TriggerUpdate();
@@ -304,20 +300,14 @@ public:
 	vncBuffer		m_buffer;
 		//SINGLE WINDOW
 	vncServer		*GetServerPointer() {return m_server;};
-	HWND			m_Single_hWnd;
-	HWND			m_Single_hWnd_backup;
-	BOOL			CalculateSWrect(RECT &rect);
 	rfb::Rect		GetSize();
-	rfb::Rect		GetQuarterSize();
+	void		SetBitmapRectOffsetAndClipRect(int offesetx, int offsety, int width = 0 , int height = 0);
 
 	// Modif rdv@2002 - v1.1.x - videodriver
 	//BOOL IsVideoDriverEnabled();
 	BOOL VideoBuffer();
 	int m_ScreenOffsetx;
 	int m_ScreenOffsety;
-	// JnZn558
-	int m_ScreenWidth;
-	int m_ScreenHeight;
 	//
 	int DriverType;
 	DWORD color[10];
@@ -331,7 +321,6 @@ public:
 	void SethookMechanism(BOOL hookall,BOOL hookdriver);
 	bool m_UltraEncoder_used;
 	rfb::Rect		m_Cliprect;//the region to check
-	bool StopDriverWatches;
 
 	PCHANGES_BUF pchanges_buf;
 	CHANGES_BUF changes_buf;
@@ -380,7 +369,6 @@ protected:
 	BOOL ThunkBitmapInfo();
 	DWORD SetPixFormat();
 	BOOL SetPixShifts();
-	BOOL InitHooks();
 	BOOL SetPalette();
 	int m_timer;
 
@@ -403,11 +391,6 @@ protected:
 	WindowsList  m_lWList;		 // List of Windows handles  
 	// HDC	         m_hDC;			 // Local Screen Device context to capture our Grid of pixels 
 	int          m_nGridCycle;   // Cycle index for grid shifting
-
-	// Modif sf@2002 - v1.1.0
-	long         m_lLastMouseUpdateTime;
-	long         m_lLastSlowClientTestTime;
-	// long			m_lLastTempo;
 
 	// sf@2002 - TextChat - No more used for now
 	// bool m_fTextChatRunning;
@@ -477,22 +460,16 @@ protected:
 	rfb::Rect		m_foreground_window_rect;
 
 	//SINGLE WINDOW
-	void SWinit();
-	int m_SWHeight;
-	int m_SWWidth;
-	BOOL m_SWSizeChanged;
-	BOOL m_SWmoved;
-	BOOL m_SWtoDesktop;
 	int m_SWOffsetx;
 	int m_SWOffsety;
 
 	//DDIHOOK
 
 	// Modif rdv@2002 - v1.1.x - videodriver
-	VIDEODRIVER *m_videodriver;
+	ScreenCapture *m_screenCapture;
 	BOOL InitVideoDriver();
  	void ShutdownVideoDriver();
-	omni_mutex		m_videodriver_lock;
+	omni_mutex		m_screenCapture_lock;
 
 	// Modif input dis/enabke
 	DWORD m_thread_hooks;
@@ -531,7 +508,6 @@ protected:
 	pBlockInput pbi;
 	HMODULE hUser32;
 	BOOL no_default_desktop;
-	COLORREF CapturePixel(int x,int y);
 	HANDLE InitWindowThreadh;
 	void StopInitWindowthread();
 	void StartInitWindowthread();
@@ -554,17 +530,13 @@ BOOL DriverWantedSet;
 //Multi monitor
 monitor mymonitor[4];
 int nr_monitors;
-bool multi_monitor;
+bool show_multi_monitors;
 bool requested_multi_monitor;
 
 bool m_bIsInputDisabledByClient; // 28 March 2008 jdp
 #ifdef AVILOG
 CAVIGenerator *AviGen;
 #endif
-
-bool startedw8;
-unsigned char *w8_data;
-mystruct *plist;
 
 private:
 	HDESK m_input_desktop;
