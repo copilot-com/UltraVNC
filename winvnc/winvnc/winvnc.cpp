@@ -27,7 +27,12 @@
 // 24/11/97		WEZ
 
 // WinMain and main WndProc for the new version of WinVNC
-
+#ifdef _INTERNALLIB
+#pragma comment(lib, "zlibstat.lib")
+#pragma comment(lib, "zip32.lib")
+#pragma comment(lib, "unz32lib.lib")
+#pragma comment(lib, "libjpeg-turbo-win-static.lib")
+#endif
 ////////////////////////////
 // System headers
 #include "stdhdrs.h"
@@ -211,7 +216,11 @@ Myinit(HINSTANCE hInstance)
 // routine or, under NT, the main service routine.
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine, int iCmdShow)
 {
-
+#ifndef _INTERNALLIB
+	if (VNCOS.OS_XP==true)
+		 MessageBoxSecure(NULL, "WIndows XP require special build", "Warning", MB_ICONERROR);
+#endif
+		
 	if (VNCOS.OS_NOTSUPPORTED==true)
 	{
 		 MessageBoxSecure(NULL, "Error OS not supported","Unsupported OS", MB_ICONERROR);
@@ -235,8 +244,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR szCmdLine,
 	memset(&info, 0, sizeof(CR_INSTALL_INFO));
 	info.cb = sizeof(CR_INSTALL_INFO);
 	info.pszAppName = _T("UVNC");
-	info.pszAppVersion = _T("1.2.1.6");
-	info.pszEmailSubject = _T("UVNC server 1.2.1.6 Error Report");
+	info.pszAppVersion = _T("1.2.1.7");
+	info.pszEmailSubject = _T("UVNC server 1.2.1.7 Error Report");
 	info.pszEmailTo = _T("uvnc@skynet.be");
 	info.uPriorities[CR_SMAPI] = 1; // Third try send report over Simple MAPI    
 	// Install all available exception handlers

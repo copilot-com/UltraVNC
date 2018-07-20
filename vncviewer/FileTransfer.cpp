@@ -49,10 +49,10 @@
 #include "Exception.h"
 #include "commctrl.h"
 #include "shlobj.h"
-#ifdef IPP
-#include "../ipp_zlib/src/zlib-1.2.5/zlib.h"
+#ifdef _INTERNALLIB
+#include <zlib.h>
 #else
-#include "zlib-1.2.5/zlib.h"
+#include "../zlib-1.2.5/zlib.h"
 #endif
 #include "Log.h"
 #include <string>
@@ -337,7 +337,7 @@ FileTransfer::~FileTransfer()
 
 
 void FileTransfer::InitFTTimer()
-{
+{	
 #ifdef FT_USE_MMTIMER
 	if (m_mmRes != -1) return;
 
@@ -677,6 +677,7 @@ bool FileTransfer::TestPermission(long lSize, int nVersion)
 		SetStatus(sz_H3);
 		DisableButtons(hWnd, false);
 		ShowWindow(GetDlgItem(hWnd, IDCANCEL), SW_SHOW);
+		ShowWindow(GetDlgItem(hWnd, IDCANCEL2), SW_SHOW);
 	}
 	else
 	{
@@ -2368,8 +2369,10 @@ bool FileTransfer::FinishFileReception()
 
     // hide the stop button
     ShowWindow(GetDlgItem(hWnd, IDC_ABORT_B), SW_HIDE);
+	ShowWindow(GetDlgItem(hWnd, IDC_ABORT_B2), SW_HIDE);
 	bool bWasDir = UnzipPossibleDirectory(m_szDestFileName);
     ShowWindow(GetDlgItem(hWnd, IDC_ABORT_B), SW_SHOW);
+	ShowWindow(GetDlgItem(hWnd, IDC_ABORT_B2), SW_SHOW);
 
     if (!m_fFileDownloadError && !bWasDir)
     {
@@ -2594,7 +2597,7 @@ bool FileTransfer::OfferLocalFile(LPSTR szSrcFileName)
 
     // show the stop button
     ShowWindow(GetDlgItem(hWnd, IDC_ABORT_B), SW_SHOW);
-
+	ShowWindow(GetDlgItem(hWnd, IDC_ABORT_B2), SW_SHOW);
     m_pCC->SetSendTimeout();
 	return true;
 }
@@ -2979,6 +2982,7 @@ bool FileTransfer::FinishFileSending()
 
     // hide the stop button
     ShowWindow(GetDlgItem(hWnd, IDC_ABORT_B), SW_HIDE);
+	ShowWindow(GetDlgItem(hWnd, IDC_ABORT_B2), SW_HIDE);
 	// Sound notif
 	//MessageBeep(-1);
 
@@ -3325,13 +3329,15 @@ BOOL CALLBACK FileTransfer::FileTransferDlgProc(  HWND hWnd,  UINT uMsg,  WPARAM
 			// DWORD lTime = timeGetTime();
 			// DWORD lLastTime = _this->m_pCC->m_lLastRfbRead;
 			// DWORD lDelta = abs(timeGetTime() - _this->m_pCC->m_lLastRfbRead);
-			if (true/*meGetTime() - _this->m_pCC->m_lLastRfbRead) > 1000 */)
+			if (true && wParam != 100/*meGetTime() - _this->m_pCC->m_lLastRfbRead) > 1000 */)
 			{
 				_this->m_fFileCommandPending = true;
 				_this->RequestPermission();
 				if (KillTimer(hWnd, _this->m_timer))
 					_this->m_timer = 0;
 			}
+			else
+				_this->m_pCC->SendKeepAlive(false, true);
 		break;
 		}
 
@@ -3340,6 +3346,7 @@ BOOL CALLBACK FileTransfer::FileTransferDlgProc(  HWND hWnd,  UINT uMsg,  WPARAM
             helper::SafeSetWindowUserData(hWnd, lParam);
 
             FileTransfer *l_this = (FileTransfer *) lParam;
+			SetTimer(hWnd, 100, 5000, NULL);
             // CentreWindow(hWnd);
 			l_this->hWnd = hWnd;
 			hFTWnd = hWnd;
@@ -3571,7 +3578,7 @@ BOOL CALLBACK FileTransfer::FileTransferDlgProc(  HWND hWnd,  UINT uMsg,  WPARAM
 			// Disable buttons
 			_this->DisableButtons(_this->hWnd);
 			ShowWindow(GetDlgItem(hWnd, IDC_ABORT_B), SW_SHOW);
-
+			ShowWindow(GetDlgItem(hWnd, IDC_ABORT_B2), SW_SHOW);
 			// Get the fisrt selected file name
 			_this->m_iFile = _this->m_FilesList.begin();
 			Item.iItem = *_this->m_iFile;
@@ -3674,7 +3681,7 @@ BOOL CALLBACK FileTransfer::FileTransferDlgProc(  HWND hWnd,  UINT uMsg,  WPARAM
 			// Disable buttons
 			_this->DisableButtons(_this->hWnd);
 			ShowWindow(GetDlgItem(_this->hWnd, IDC_ABORT_B), SW_SHOW);
-
+			ShowWindow(GetDlgItem(_this->hWnd, IDC_ABORT_B2), SW_SHOW);
 			// Get the fisrt selected file name
 			_this->m_iFile = _this->m_FilesList.begin();
 			Item.iItem = *_this->m_iFile;
@@ -3740,6 +3747,15 @@ BOOL CALLBACK FileTransfer::FileTransferDlgProc(  HWND hWnd,  UINT uMsg,  WPARAM
 		case IDC_ABORT_B:
 			_this->m_fAbort = true;
             _this->m_fUserAbortedFileTransfer = true;
+			ShowWindow(GetDlgItem(_this->hWnd, IDC_ABORT_B), SW_HIDE);
+			break;
+		
+		case IDCANCEL2:
+		case IDC_ABORT_B2:
+			_this->m_fAbort = true;
+			_this->m_fUserAbortedFileTransfer = true;
+			_this->m_fUserForcedAbortedFileTransfer = true;
+			closesocket(_this->m_pCC->m_sock);
 			ShowWindow(GetDlgItem(_this->hWnd, IDC_ABORT_B), SW_HIDE);
 			break;
 
@@ -4233,6 +4249,7 @@ BOOL CALLBACK FileTransfer::FileTransferDlgProc(  HWND hWnd,  UINT uMsg,  WPARAM
 		MoveWindow(GetDlgItem(hWnd, IDC_UPLOAD_B),     lf_an+10+2,  icy-15-20-6-20-5-20, 90, 20, TRUE);
 		MoveWindow(GetDlgItem(hWnd, IDC_DOWNLOAD_B),   lf_an+10+2,       icy-15-20-6-20, 90, 20, TRUE);
 		MoveWindow(GetDlgItem(hWnd, IDC_ABORT_B),      lf_an+10+2,            icy-15-20, 90, 20, TRUE);
+		MoveWindow(GetDlgItem(hWnd, IDC_ABORT_B2),	   lf_an + 10 + 2, icy - 10, 90, 20, TRUE);
 		MoveWindow(GetDlgItem(hWnd, IDC_DELETE_B),     lf_an+10+2,               icy+15, 90, 20, TRUE);
 		MoveWindow(GetDlgItem(hWnd, IDC_NEWFOLDER_B),  lf_an+10+2,          icy+15+20+6, 90, 20, TRUE);
 		MoveWindow(GetDlgItem(hWnd, IDC_RENAME_B),     lf_an+10+2,     icy+15+20+6+20+6, 90, 20, TRUE);
@@ -4339,6 +4356,7 @@ BOOL CALLBACK FileTransfer::FileTransferDlgProc(  HWND hWnd,  UINT uMsg,  WPARAM
 
 	case WM_DESTROY:
 		if (_this->m_timer != 0) KillTimer(hWnd, _this->m_timer);
+		KillTimer(hWnd, 100);
 		EndDialog(hWnd, FALSE);
 		return TRUE;
 
@@ -4432,7 +4450,7 @@ BOOL CALLBACK FileTransfer::FTParamDlgProc(  HWND hwnd,  UINT uMsg, WPARAM wPara
 			return TRUE;
 		}
 		break;
-	case WM_DESTROY:
+	case WM_DESTROY:		
 		EndDialog(hwnd, FALSE);
 		return TRUE;
 	}
@@ -4504,7 +4522,7 @@ BOOL CALLBACK FileTransfer::FTConfirmDlgProc(  HWND hwnd,  UINT uMsg, WPARAM wPa
 		}
 		break;
 
-	case WM_DESTROY:
+	case WM_DESTROY:		
 		EndDialog(hwnd, FALSE);
 		return TRUE;
 	}
@@ -4522,6 +4540,7 @@ void FileTransfer::DisableButtons(HWND hWnd, bool X)
 	ShowWindow(GetDlgItem(hWnd, IDC_NEWFOLDER_B), SW_HIDE);
 	ShowWindow(GetDlgItem(hWnd, IDC_RENAME_B), SW_HIDE);
 	ShowWindow(GetDlgItem(hWnd, IDCANCEL), SW_HIDE);
+	ShowWindow(GetDlgItem(hWnd, IDCANCEL2), SW_HIDE);
 	ShowWindow(GetDlgItem(hWnd, IDC_HIDE_B), SW_SHOW);
 	EnableWindow(GetDlgItem(hWnd, IDC_LOCAL_FILELIST), FALSE);
 	EnableWindow(GetDlgItem(hWnd, IDC_LOCAL_DRIVECB), FALSE);
@@ -4569,9 +4588,11 @@ void FileTransfer::CheckButtonState(HWND hWnd)
 void FileTransfer::EnableButtons(HWND hWnd)
 {
 	ShowWindow(GetDlgItem(hWnd, IDC_ABORT_B), SW_HIDE);
+	ShowWindow(GetDlgItem(hWnd, IDC_ABORT_B2), SW_HIDE);
 	ShowWindow(GetDlgItem(hWnd, IDC_UPLOAD_B), SW_SHOW);
 	ShowWindow(GetDlgItem(hWnd, IDC_DOWNLOAD_B), SW_SHOW);
 	ShowWindow(GetDlgItem(hWnd, IDCANCEL), SW_SHOW);
+	ShowWindow(GetDlgItem(hWnd, IDCANCEL2), SW_SHOW);
 	ShowWindow(GetDlgItem(hWnd, IDC_DELETE_B), SW_SHOW);
 	ShowWindow(GetDlgItem(hWnd, IDC_NEWFOLDER_B), SW_SHOW);
 	if (!UsingOldProtocol())

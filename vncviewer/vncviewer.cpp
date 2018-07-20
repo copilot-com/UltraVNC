@@ -28,6 +28,13 @@
 #include "vncviewer.h"
 #include "Exception.h"
 #include "display.h"
+#ifdef _INTERNALLIB
+#pragma comment(lib, "zlibstat.lib")
+#pragma comment(lib, "zip32.lib")
+#pragma comment(lib, "unz32lib.lib")
+#pragma comment(lib, "libjpeg-turbo-win-static.lib")
+#endif
+
 
 // [v1.0.2-jp1 fix] Support "LinkLabel"
 //#include "LinkLabel.h"
@@ -331,10 +338,6 @@ static BOOL read_reg_string(HKEY key, char* sub_key, char* val_name, LPBYTE data
         return ret;
 }
 
-#ifdef IPP
-void InitIpp();
-#endif
-
 //#define CRASHRPT
 #ifdef CRASHRPT
 #ifndef _X64
@@ -360,16 +363,13 @@ if (hUser32) setDPIAware = (SetProcessDPIAwareFunc)GetProcAddress(hUser32, "SetP
 if (setDPIAware) setDPIAware();
 if (hUser32) FreeLibrary(hUser32);
 
-#ifdef IPP
-	InitIpp();
-#endif
 #ifdef CRASHRPT
 	CR_INSTALL_INFO info;
 	memset(&info, 0, sizeof(CR_INSTALL_INFO));
 	info.cb = sizeof(CR_INSTALL_INFO);
 	info.pszAppName = _T("UVNC");
-	info.pszAppVersion = _T("1.2.1.6");
-	info.pszEmailSubject = _T("UVNC viewer 1.2.1.6 Error Report");
+	info.pszAppVersion = _T("1.2.1.7");
+	info.pszEmailSubject = _T("UVNC viewer 1.2.1.7 Error Report");
 	info.pszEmailTo = _T("uvnc@skynet.be");
 	info.uPriorities[CR_SMAPI] = 1; // Third try send report over Simple MAPI    
 	// Install all available exception handlers

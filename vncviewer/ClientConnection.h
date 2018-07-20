@@ -39,14 +39,19 @@
 #include "KeyMap.h"
 #include "KeyMapJap.h"
 #include <rdr/types.h>
-#ifdef IPP
-#include "../ipp_zlib/src/zlib-1.2.5/zlib.h"
+#ifdef _INTERNALLIB
+#include <zlib.h>
 #else
-#include "zlib-1.2.5/zlib.h"
+#include "../zlib-1.2.5/zlib.h"
 #endif
+
 extern "C"
 {
-	#include "libjpeg-turbo-win/jpeglib.h" // For Tight encoding
+#ifdef _INTERNALLIB
+#include <jpeglib.h>
+#else
+#include "libjpeg-turbo-win/jpeglib.h"
+#endif
 }
 #include "FileTransfer.h" // sf@2002
 #include "TextChat.h" // sf@2002
@@ -802,6 +807,11 @@ private:
 	UINT m_idle_time;
 	ViewerDirectxClass directx_output;
 	bool directx_used;
+
+
+	jpeg_source_mgr m_jpegSrcManager;
+
+
 public:
 	// RFB settings
 	VNCOptions m_opts;

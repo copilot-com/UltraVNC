@@ -25,6 +25,7 @@ LANGUAGE LANG_JAPANESE, SUBLANG_DEFAULT
 //
 
 IDC_FINGER              CURSOR                  "Finger.cur"
+
 #endif    // Japanese (Japan) resources
 /////////////////////////////////////////////////////////////////////////////
 
@@ -42,8 +43,11 @@ LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
 //
 
 IDC_CURSOR1             CURSOR                  "cursorsel.cur"
+
 IDC_DOTCURSOR           CURSOR                  "cursor1.cur"
+
 IDC_NOCURSOR            CURSOR                  "nocursor.cur"
+
 
 #ifdef APSTUDIO_INVOKED
 /////////////////////////////////////////////////////////////////////////////
@@ -79,10 +83,15 @@ END
 // Icon with lowest ID value placed first to ensure application icon
 // remains consistent on all systems.
 IDR_TRAY                ICON                    "idr_tray.ico"
+
 IDI_NET                 ICON                    "B46.ico"
+
 IDI_FILE                ICON                    "file.ico"
+
 IDI_DIR                 ICON                    "dir.ico"
+
 IDI_DRIVE               ICON                    "drive.ico"
+
 
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -237,11 +246,13 @@ BEGIN
     CONTROL         "List3",IDC_REMOTE_FILELIST,"SysListView32",LVS_REPORT | LVS_SHOWSELALWAYS | LVS_SORTASCENDING | LVS_AUTOARRANGE | WS_BORDER | WS_TABSTOP,314,31,238,324
     LTEXT           "",IDC_GLOBAL_STATUS,484,388,65,8,0,WS_EX_RIGHT
     LTEXT           "",IDC_PERCENT,356,388,120,8
+    PUSHBUTTON      "Forced Stop",IDC_ABORT_B2,249,160,60,14,BS_FLAT | NOT WS_VISIBLE
+    PUSHBUTTON      "Forced Close",IDCANCEL2,248,355,60,14
 END
 
 IDD_SESSION_DLG DIALOGEX 0, 0, 245, 229
 STYLE DS_SETFONT | DS_MODALFRAME | DS_SETFOREGROUND | DS_FIXEDSYS | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "UltraVNC Viewer - 1.2.1.6"
+CAPTION "UltraVNC Viewer - 1.2.1.7"
 FONT 8, "MS Shell Dlg", 0, 0, 0x0
 BEGIN
     CONTROL         IDB_VNC32,IDC_STATIC,"Static",SS_BITMAP,3,2,24,24
@@ -415,7 +426,7 @@ FONT 8, "MS Shell Dlg", 0, 0, 0x1
 BEGIN
     DEFPUSHBUTTON   "OK",IDOK,8,137,62,14
     CONTROL         ID_BUTTON_SEP,IDC_STATIC,"Static",SS_BITMAP | SS_CENTERIMAGE | SS_SUNKEN,8,7,62,54
-    LTEXT           "UltraVNC Viewer 1.2.1.6",IDC_STATIC,86,6,197,11
+    LTEXT           "UltraVNC Viewer 1.2.1.7",IDC_STATIC,86,6,197,11
     LTEXT           "For more Information and Links please visit: \nhttp://www.uvnc.com",IDC_STATIC,86,133,197,19
     LTEXT           "Copyright © 2002-2009 UltraVNC Team\nCopyright © 2001-2002 Sam - eSVNC \nCopyright © 1999-2002 Rudi D. V. - VdaccVNC \nCopyright © 1999-2002 Const. Kaplinsky - TightVNC \nCopyright © 2002 RealVNC Ltd. - RealVNC\n",IDC_STATIC,86,30,200,40
     LTEXT           "Built:",IDC_STATIC,87,17,15,10
@@ -445,7 +456,7 @@ BEGIN
     DEFPUSHBUTTON   "Close",IDOK,185,110,56,14
     LTEXT           "BuildTime",IDC_BUILDTIME,9,11,265,88
     GROUPBOX        "Info Message",IDC_STATIC,3,1,274,100,BS_CENTER
-    CTEXT           "UltraVNC 1.2.1.6",IDC_STATIC,178,145,66,12
+    CTEXT           "UltraVNC 1.2.1.7",IDC_STATIC,178,145,66,12
     PUSHBUTTON      "",IDC_BUTTON1,7,104,170,47,BS_BITMAP
 END
 
@@ -458,7 +469,7 @@ BEGIN
     LTEXT           "BuildTime",IDC_BUILDTIME,9,11,258,97
     PUSHBUTTON      "",IDC_BUTTON2,7,114,170,47,BS_BITMAP
     GROUPBOX        "Info Message",IDC_STATIC,3,1,264,110,BS_CENTER
-    CTEXT           "UltraVNC 1.2.1.6",IDC_STATIC,175,204,69,12
+    CTEXT           "UltraVNC 1.2.1.7",IDC_STATIC,175,204,69,12
     PUSHBUTTON      "",IDC_BUTTON1,7,163,170,47,BS_BITMAP
     CTEXT           "Sponsored\n Link",IDC_STATIC,179,127,36,21
 END
@@ -500,7 +511,7 @@ BEGIN
         VERTGUIDE, 274
         VERTGUIDE, 279
         VERTGUIDE, 486
-        BOTTOMMARGIN, 260
+        BOTTOMMARGIN, 397
     END
 
     IDD_SESSION_DLG, DIALOG
@@ -677,18 +688,31 @@ END
 //
 
 IDB_BITMAP2             BITMAP                  "hoch.bmp"
+
 IDB_BITMAP3             BITMAP                  "quer.bmp"
+
 IDB_STAT_BACK           BITMAP                  "stat\\back.bmp"
+
 IDB_STAT_BOTH           BITMAP                  "stat\\both.bmp"
+
 IDB_STAT_FRONT          BITMAP                  "stat\\front.bmp"
+
 IDB_STAT_NONE           BITMAP                  "stat\\none.bmp"
+
 IDB_VNC64               BITMAP                  "vnc64.BMP"
+
 IDB_CLOSE               BITMAP                  "stat\\closeup.bmp"
+
 IDB_MAXIMIZE            BITMAP                  "stat\\maximizeup.bmp"
+
 IDB_MINIMIZE            BITMAP                  "stat\\minimizeup.bmp"
+
 IDB_PINDOWN             BITMAP                  "stat\\pindown.bmp"
+
 IDB_PINUP               BITMAP                  "stat\\pinup.bmp"
+
 IDB_VNC32               BITMAP                  "vnc32.BMP"
+
 
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -696,8 +720,8 @@ IDB_VNC32               BITMAP                  "vnc32.BMP"
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,2,1,6
- PRODUCTVERSION 1,2,1,6
+ FILEVERSION 1,2,1,7
+ PRODUCTVERSION 1,2,1,7
  FILEFLAGSMASK 0x37L
 #ifdef _DEBUG
  FILEFLAGS 0x25L
@@ -715,18 +739,29 @@ BEGIN
             VALUE "Comments", "UltraVNC Viewer"
             VALUE "CompanyName", "UltraVNC"
             VALUE "FileDescription", "VNCViewer"
-            VALUE "FileVersion", "1.2.1.6"
+            VALUE "FileVersion", "1.2.1.7"
             VALUE "InternalName", "VNCViewer"
             VALUE "LegalCopyright", "Copyright © 2015 UltraVNC team members"
             VALUE "OriginalFilename", "VNCViewer.exe"
             VALUE "ProductName", "UltraVNC VNCViewer"
-            VALUE "ProductVersion", "1.2.1.6"
+            VALUE "ProductVersion", "1.2.1.7"
         END
     END
     BLOCK "VarFileInfo"
     BEGIN
         VALUE "Translation", 0x0, 1200
     END
+END
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// AFX_DIALOG_LAYOUT
+//
+
+IDD_FILETRANSFER_DLG AFX_DIALOG_LAYOUT
+BEGIN
+    0
 END
 
 
@@ -1093,9 +1128,13 @@ LANGUAGE LANG_DUTCH, SUBLANG_DUTCH
 //
 
 IDB_BITMAPsx            BITMAP                  "Tango_sx.bmp"
+
 IDB_BITMAPl             BITMAP                  "Tango_l.bmp"
+
 IDB_BITMAPlx            BITMAP                  "Tango_lx.bmp"
+
 IDB_BITMAPs             BITMAP                  "Tango_s.bmp"
+
 #endif    // Dutch (Netherlands) resources
 /////////////////////////////////////////////////////////////////////////////
 
@@ -1115,6 +1154,7 @@ LANGUAGE LANG_DUTCH, SUBLANG_DUTCH_BELGIAN
 // Icon with lowest ID value placed first to ensure application icon
 // remains consistent on all systems.
 IDR_TRAY_DISABLED       ICON                    "idr_tray_disabled.ico"
+
 
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -1157,7 +1197,9 @@ END
 //
 
 IDB_BITMAP14            BITMAP                  "l2.bmp"
+
 IDB_BITMAP13            BITMAP                  "l1.bmp"
+
 #endif    // Dutch (Belgium) resources
 /////////////////////////////////////////////////////////////////////////////
 
